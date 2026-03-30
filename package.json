@@ -1,0 +1,36 @@
+{
+  "name": "job-agent",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "packages/scraper",
+    "packages/api",
+    "packages/ui"
+  ],
+  "scripts": {
+    "scraper": "npm run dev -w packages/scraper",
+    "scraper:rescore": "npm run rescore -w packages/scraper",
+    "scraper:phase3": "npm run phase3 -w packages/scraper",
+    "scraper:phase3:force": "npm run phase3:force -w packages/scraper",
+    "scraper:alerts": "npm run alerts -w packages/scraper",
+    "scraper:phase4": "npm run phase4 -w packages/scraper",
+    "api": "npm run start:dev -w packages/api",
+    "ui": "npm run dev -w packages/ui",
+    "lint": "eslint packages/*/src --ext .ts,.tsx",
+    "format": "prettier --write packages/*/src",
+    "scraper:verify": "npm run verify-slugs -w packages/scraper"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0"
+  }
+}

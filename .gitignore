@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.local
+.claude
+.DS_Store
+.vscode/
+log.txt
+packages/scraper/data/
+packages/scraper/profile/candidate.json

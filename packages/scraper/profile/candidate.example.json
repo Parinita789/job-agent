@@ -1,0 +1,120 @@
+{
+  "meta": {
+    "version": "1.0",
+    "last_updated": "2026-01-01",
+    "agent": "job-agent-phase-1"
+  },
+
+  "personal": {
+    "name": "Your Name",
+    "email": "you@example.com",
+    "phone": "+1 000-000-0000",
+    "location": "City, State, USA",
+    "linkedin": "https://linkedin.com/in/your-profile",
+    "github": "https://github.com/your-username"
+  },
+
+  "experience": {
+    "total_years": 5,
+    "current_level": "Software Engineer",
+    "summary": "Brief 1-2 sentence summary of your background and specialization."
+  },
+
+  "skills": {
+    "languages": ["TypeScript", "Go"],
+    "frameworks": ["Node.js", "NestJS"],
+    "databases": ["PostgreSQL", "Redis"],
+    "messaging": ["Kafka", "SQS"],
+    "cloud": ["AWS"],
+    "devops": ["Docker", "GitHub Actions"],
+    "architecture": ["Microservices", "Distributed Systems"],
+    "ai": [],
+    "tools": ["Git", "Jest"],
+    "methodologies": ["Agile"]
+  },
+
+  "top_achievements": [
+    {
+      "company": "Company A",
+      "impact": "Describe a measurable achievement (e.g., 'Reduced API latency by 40% through caching and query optimization')."
+    },
+    {
+      "company": "Company B",
+      "impact": "Describe another measurable achievement."
+    }
+  ],
+
+  "work_history": [
+    {
+      "company": "Company A",
+      "location": "City, Country",
+      "title": "Software Engineer",
+      "start": "2022-01",
+      "end": "present",
+      "duration_years": 3.0
+    },
+    {
+      "company": "Company B",
+      "location": "City, Country",
+      "title": "Junior Engineer",
+      "start": "2020-01",
+      "end": "2021-12",
+      "duration_years": 2.0
+    }
+  ],
+
+  "preferences": {
+    "target_roles": [
+      "Senior Software Engineer",
+      "Backend Engineer"
+    ],
+    "location": {
+      "current_city": "City, State, USA",
+      "remote": true,
+      "hybrid_us": true,
+      "onsite": false,
+      "international_remote": false
+    },
+    "employment_type": ["full-time"],
+    "visa_sponsorship_required": false,
+    "company_size": {
+      "growth_startup": true,
+      "mid_size": true,
+      "enterprise": true,
+      "early_startup": false
+    },
+    "excluded_industries": [],
+    "preferred_domains": [
+      "Fintech",
+      "SaaS",
+      "Developer Tools"
+    ]
+  },
+
+  "compensation": {
+    "currency": "USD",
+    "base_salary_min": 100000,
+    "base_salary_preferred": 130000,
+    "equity": "open to discussing",
+    "notes": "Adjust these to your requirements."
+  },
+
+  "deal_breakers": [
+    "Base salary below $100,000 USD",
+    "Roles that are primarily frontend (>50% React/Vue/CSS work)"
+  ],
+
+  "strengths_for_agent": {
+    "use_for_cover_letter": [
+      "Key strength or achievement for cover letters",
+      "Another key strength"
+    ],
+    "ats_keywords": [
+      "TypeScript",
+      "Node.js",
+      "AWS",
+      "microservices",
+      "backend engineer"
+    ]
+  }
+}

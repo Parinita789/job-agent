@@ -1,0 +1,41 @@
+import React from 'react';
+
+type Tab = 'queue' | 'applied' | 'rejected';
+
+interface TabBarProps {
+  activeTab: Tab;
+  onTabChange: (tab: Tab) => void;
+  counts: { queue: number; applied: number; rejected: number };
+  onOpenCommands: () => void;
+  onOpenKeywords: () => void;
+}
+
+export function TabBar({ activeTab, onTabChange, counts, onOpenCommands, onOpenKeywords }: TabBarProps) {
+  const tabs: { key: Tab; label: string; count: number }[] = [
+    { key: 'queue', label: 'Queue', count: counts.queue },
+    { key: 'applied', label: 'Applied', count: counts.applied },
+    { key: 'rejected', label: 'Rejected', count: counts.rejected },
+  ];
+
+  return (
+    <div className="tab-bar">
+      {tabs.map((tab) => (
+        <button
+          key={tab.key}
+          className={`tab-btn ${activeTab === tab.key ? 'active' : ''}`}
+          onClick={() => onTabChange(tab.key)}
+        >
+          {tab.label}
+          <span className="count">({tab.count})</span>
+        </button>
+      ))}
+      <div className="tab-spacer" />
+      <button className="pipeline-btn keywords-btn" onClick={onOpenKeywords}>
+        Keywords
+      </button>
+      <button className="pipeline-btn" onClick={onOpenCommands}>
+        Commands
+      </button>
+    </div>
+  );
+}

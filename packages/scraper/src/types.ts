@@ -1,0 +1,31 @@
+export type JobSource = 'linkedin' | 'greenhouse' | 'lever';
+
+export type JobStatus = 'to_apply' | 'applied' | 'rejected' | 'no_response' | 'interviewing';
+
+export interface JobListing {
+  id: string;
+  title: string;
+  company: string;
+  location: string;
+  remote: boolean;
+  employment_type: string;
+  salary_min?: number;
+  salary_max?: number;
+  description: string;
+  url: string;
+  source: JobSource;
+  scraped_at: string;
+}
+
+export interface ScoredJob extends JobListing {
+  fit_score: number;
+  apply: boolean;
+  matched_skills: string[];
+  missing_skills: string[];
+  reason: string;
+  deal_breaker?: string;
+  status: JobStatus;
+  applied_at?: string;
+  cover_letter?: string;
+  notes?: string;
+}
