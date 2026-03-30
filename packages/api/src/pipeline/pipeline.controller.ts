@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
 import { PipelineService } from './pipeline.service';
 
 @Controller('pipeline')
@@ -8,6 +8,17 @@ export class PipelineController {
   @Get('commands')
   getCommands() {
     return this.pipelineService.getAvailableCommands();
+  }
+
+  @Get('phases')
+  getPhases() {
+    return this.pipelineService.getAvailablePhases();
+  }
+
+  @Post('run-phases')
+  async runPhases(@Body('phases') phases: string[]) {
+    await this.pipelineService.runSelectedPhases(phases);
+    return { message: 'Pipeline started' };
   }
 
   @Post('run/:commandId')

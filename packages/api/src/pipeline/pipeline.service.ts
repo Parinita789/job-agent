@@ -13,6 +13,14 @@ export interface PipelineState {
 
 const SCRAPER_DIR_RESOLVER = () => path.resolve(process.cwd(), '../scraper');
 
+const PHASE_LIST = [
+  { id: 'scrape', label: 'Scrape + Score', name: 'scrape + score', cmd: 'npx', args: ['tsx', 'src/phase2.ts'] },
+  { id: 'alerts', label: 'LinkedIn Alerts', name: 'scrape alerts + score', cmd: 'npx', args: ['tsx', 'src/phase-alerts.ts'] },
+  { id: 'rescore', label: 'Rescore Jobs', name: 'rescore', cmd: 'npx', args: ['tsx', 'src/rescore.ts'] },
+  { id: 'cover-letters', label: 'Cover Letters', name: 'cover letters', cmd: 'npx', args: ['tsx', 'src/phase3.ts'] },
+  { id: 'apply', label: 'Auto Apply', name: 'auto apply', cmd: 'npx', args: ['tsx', 'src/phase4.ts'] },
+];
+
 const COMMANDS: Record<string, { label: string; phases: { name: string; cmd: string; args: string[] }[] }> = {
   pipeline: {
     label: 'Full Pipeline',
@@ -82,6 +90,10 @@ export class PipelineService {
     return Object.entries(COMMANDS).map(([id, c]) => ({ id, label: c.label }));
   }
 
+  getAvailablePhases(): { id: string; label: string }[] {
+    return PHASE_LIST.map((p) => ({ id: p.id, label: p.label }));
+  }
+
   async runCommand(commandId: string): Promise<void> {
     if (this.state.running) {
       throw new ConflictException('A command is already running');
@@ -107,6 +119,38 @@ export class PipelineService {
 
     // run in background
     this.runPhasesSequentially(command.phases, scraperDir);
+  }
+
+  async runSelectedPhases(phaseIds: string[]): Promise<void> {
+    if (this.state.running) {
+      throw new ConflictException('A command is already running');
+    }
+
+    const phases = phaseIds
+      .map((id) => PHASE_LIST.find((p) => p.id === id))
+      .filter(Boolean) as typeof PHASE_LIST;
+
+    if (phases.length === 0) {
+      throw new Error('No valid phases selected');
+    }
+
+    const label = phases.length === PHASE_LIST.length
+      ? 'Full Pipeline'
+      : phases.map((p) => p.label).join(' + ');
+
+    this.state = {
+      running: true,
+      phase: phases[0].name,
+      command: label,
+      error: null,
+      lastRunAt: null,
+      logs: [],
+    };
+
+    this.addLog(`--- ${label} started ---`);
+
+    const scraperDir = SCRAPER_DIR_RESOLVER();
+    this.runPhasesSequentially(phases, scraperDir);
   }
 
   private addLog(line: string) {

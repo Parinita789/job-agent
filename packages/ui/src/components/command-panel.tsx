@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import type { PipelineStatus, PipelineCommand } from '../types';
+import type { PipelineStatus } from '../types';
+
+interface Phase {
+  id: string;
+  label: string;
+}
+
+const PHASE_DESCRIPTIONS: Record<string, string> = {
+  scrape: 'LinkedIn, Greenhouse, Lever',
+  alerts: 'From saved alert feeds',
+  rescore: 'Re-evaluate all jobs',
+  'cover-letters': 'For jobs scoring 7+',
+  apply: 'LinkedIn Easy Apply',
+};
 
 interface CommandPanelProps {
   isOpen: boolean;
@@ -9,16 +22,17 @@ interface CommandPanelProps {
 }
 
 export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps) {
-  const [commands, setCommands] = useState<PipelineCommand[]>([]);
+  const [phases, setPhases] = useState<Phase[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<PipelineStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [logOffset, setLogOffset] = useState(0);
   const logRef = useRef<HTMLDivElement>(null);
 
-  // fetch available commands
+  // fetch phases + status on open
   useEffect(() => {
     if (!isOpen) return;
-    axios.get<PipelineCommand[]>('/api/pipeline/commands').then(({ data }) => setCommands(data));
+    axios.get<Phase[]>('/api/pipeline/phases').then(({ data }) => setPhases(data));
     axios.get<PipelineStatus>('/api/pipeline/status').then(({ data }) => {
       setStatus(data);
       setLogs(data.logs);
@@ -46,10 +60,7 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
 
         if (!statusRes.data.running) {
           clearInterval(interval);
-          // brief delay so user sees "completed", then close and refresh
-          setTimeout(() => {
-            onComplete();
-          }, 1500);
+          setTimeout(() => onComplete(), 1500);
         }
       } catch {
         // ignore
@@ -66,15 +77,35 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
     }
   }, [logs]);
 
-  const runCommand = async (commandId: string) => {
+  const togglePhase = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allSelected = phases.length > 0 && selected.size === phases.length;
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(phases.map((p) => p.id)));
+    }
+  };
+
+  const runSelected = async () => {
     try {
       setLogs([]);
       setLogOffset(0);
-      await axios.post(`/api/pipeline/run/${commandId}`);
+      const phaseIds = phases.filter((p) => selected.has(p.id)).map((p) => p.id);
+      await axios.post('/api/pipeline/run-phases', { phases: phaseIds });
       setStatus({
         running: true,
         phase: 'starting',
-        command: commands.find((c) => c.id === commandId)?.label ?? commandId,
+        command: phaseIds.length === phases.length ? 'Full Pipeline' : `${phaseIds.length} phases`,
         error: null,
         lastRunAt: null,
         logs: [],
@@ -93,7 +124,7 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
     <div className="modal-overlay" onClick={onClose}>
       <div className="command-panel" onClick={(e) => e.stopPropagation()}>
         <div className="command-panel-header">
-          <h2>Commands</h2>
+          <h2>Pipeline</h2>
           {running && (
             <span className="command-running-badge">
               {status?.command} &mdash; {status?.phase}
@@ -102,23 +133,42 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
 
-        <div className="command-grid">
-          {commands.map((cmd) => (
-            <button
-              key={cmd.id}
-              className="command-btn"
+        <div className="phase-checklist">
+          <label className="phase-item select-all">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAll}
               disabled={running}
-              onClick={() => runCommand(cmd.id)}
-            >
-              <span className="command-btn-label">{cmd.label}</span>
-              <span className="command-btn-id">{cmd.id}</span>
-            </button>
+            />
+            <span className="phase-label">Select All (Full Pipeline)</span>
+          </label>
+          {phases.map((phase) => (
+            <label key={phase.id} className="phase-item">
+              <input
+                type="checkbox"
+                checked={selected.has(phase.id)}
+                onChange={() => togglePhase(phase.id)}
+                disabled={running}
+              />
+              <span className="phase-label">{phase.label}</span>
+              {PHASE_DESCRIPTIONS[phase.id] && (
+                <span className="phase-desc">{PHASE_DESCRIPTIONS[phase.id]}</span>
+              )}
+            </label>
           ))}
+          <button
+            className="run-btn"
+            disabled={running || selected.size === 0}
+            onClick={runSelected}
+          >
+            Run {selected.size === phases.length ? 'Full Pipeline' : `${selected.size} Phase${selected.size !== 1 ? 's' : ''}`}
+          </button>
         </div>
 
         <div className="log-viewer" ref={logRef}>
           {logs.length === 0 ? (
-            <div className="log-empty">Select a command to run. Logs will appear here.</div>
+            <div className="log-empty">Select phases and click Run. Logs will appear here.</div>
           ) : (
             logs.map((line, i) => (
               <div

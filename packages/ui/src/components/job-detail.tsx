@@ -1,12 +1,30 @@
-import React from 'react';
+import React, { useState } from 'react';
+import axios from 'axios';
 import type { ScoredJob } from '../types';
 
 interface JobDetailProps {
   job: ScoredJob;
   onClose: () => void;
+  onJobUpdate: (updated: ScoredJob) => void;
 }
 
-export function JobDetail({ job, onClose }: JobDetailProps) {
+export function JobDetail({ job, onClose, onJobUpdate }: JobDetailProps) {
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleGenerateCoverLetter = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const { data } = await axios.post<{ cover_letter: string }>(`/api/jobs/${job.id}/cover-letter`);
+      onJobUpdate({ ...job, cover_letter: data.cover_letter });
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to generate cover letter');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -20,7 +38,7 @@ export function JobDetail({ job, onClose }: JobDetailProps) {
 
         <div className="modal-meta">
           <div className="modal-meta-item">
-            Score: <span className={job.fit_score >= 7 ? '' : ''} style={{ color: job.fit_score >= 7 ? 'var(--green)' : job.fit_score >= 5 ? 'var(--yellow)' : 'var(--red)' }}>{job.fit_score}/10</span>
+            Score: <span style={{ color: job.fit_score >= 7 ? 'var(--green)' : job.fit_score >= 5 ? 'var(--yellow)' : 'var(--red)' }}>{job.fit_score}/10</span>
           </div>
           <div className="modal-meta-item">
             Platform: <span><span className={`platform ${job.source}`}>{job.source}</span></span>
@@ -60,7 +78,7 @@ export function JobDetail({ job, onClose }: JobDetailProps) {
             <h3>Missing Skills</h3>
             <div className="skills">
               {job.missing_skills.map((s) => (
-                <span key={s} className="skill-tag" style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--red)' }}>{s}</span>
+                <span key={s} className="skill-tag" style={{ background: 'var(--red-dim)', color: 'var(--red)' }}>{s}</span>
               ))}
             </div>
           </div>
@@ -71,12 +89,34 @@ export function JobDetail({ job, onClose }: JobDetailProps) {
           <p>{job.reason}</p>
         </div>
 
-        {job.cover_letter && (
-          <div className="modal-section">
-            <h3>Cover Letter</h3>
+        <div className="modal-section">
+          <h3>Cover Letter</h3>
+          {job.cover_letter ? (
             <pre>{job.cover_letter}</pre>
-          </div>
-        )}
+          ) : (
+            <div className="cover-letter-empty">
+              <p>No cover letter generated yet.</p>
+              <button
+                className="generate-btn"
+                onClick={handleGenerateCoverLetter}
+                disabled={generating}
+              >
+                {generating ? 'Generating...' : 'Generate Cover Letter'}
+              </button>
+              {error && <p className="generate-error">{error}</p>}
+            </div>
+          )}
+          {job.cover_letter && (
+            <button
+              className="generate-btn regenerate"
+              onClick={handleGenerateCoverLetter}
+              disabled={generating}
+              style={{ marginTop: '10px' }}
+            >
+              {generating ? 'Regenerating...' : 'Regenerate'}
+            </button>
+          )}
+        </div>
 
         <div className="modal-section">
           <h3>Job Description</h3>

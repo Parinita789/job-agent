@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import type { ScoredJob } from '../types';
 import { TabBar } from './tab-bar';
@@ -6,6 +6,7 @@ import { JobTable } from './job-table';
 import { JobDetail } from './job-detail';
 import { CommandPanel } from './command-panel';
 import { KeywordManager } from './keyword-manager';
+import { ProfileEditor } from './profile-editor';
 
 type Tab = 'queue' | 'applied' | 'rejected';
 type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever';
@@ -16,6 +17,8 @@ export function App() {
   const [selectedJob, setSelectedJob] = useState<ScoredJob | null>(null);
   const [commandPanelOpen, setCommandPanelOpen] = useState(false);
   const [keywordManagerOpen, setKeywordManagerOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
 
@@ -30,12 +33,8 @@ export function App() {
     }
   }, []);
 
-  // initial fetch
-  useEffect(() => {
-    fetchJobs();
-  }, [fetchJobs]);
+  useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
-  // refresh jobs when command panel closes
   const handleClosePanel = useCallback(() => {
     setCommandPanelOpen(false);
     fetchJobs();
@@ -47,7 +46,6 @@ export function App() {
     setActiveTab('queue');
   }, [fetchJobs]);
 
-  // also poll for fresh data every 30s in case commands were run from CLI
   useEffect(() => {
     const interval = setInterval(fetchJobs, 30000);
     return () => clearInterval(interval);
@@ -57,13 +55,12 @@ export function App() {
   const queue = filtered.filter((j) => j.status === 'to_apply');
   const applied = filtered.filter((j) => j.status === 'applied');
   const rejected = filtered.filter((j) => j.status === 'rejected');
-
   const tabJobs = activeTab === 'queue' ? queue : activeTab === 'applied' ? applied : rejected;
 
   if (loading) {
     return (
       <div className="container">
-        <h1>Job Tracker</h1>
+        <div className="app-header"><h1>Job Tracker</h1></div>
         <div className="empty-state"><p>Loading...</p></div>
       </div>
     );
@@ -71,7 +68,30 @@ export function App() {
 
   return (
     <div className="container">
-      <h1>Job Tracker</h1>
+      <div className="app-header">
+        <h1>Job Tracker</h1>
+        <div className="hamburger-wrapper">
+          <button className="hamburger-btn" onClick={() => setMenuOpen(!menuOpen)}>
+            <span /><span /><span />
+          </button>
+          {menuOpen && (
+            <>
+              <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+              <div className="hamburger-menu">
+                <button onClick={() => { setProfileOpen(true); setMenuOpen(false); }}>
+                  Candidate Profile
+                </button>
+                <button onClick={() => { setKeywordManagerOpen(true); setMenuOpen(false); }}>
+                  Keywords
+                </button>
+                <button onClick={() => { setCommandPanelOpen(true); setMenuOpen(false); }}>
+                  Pipeline
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
       <TabBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -92,7 +112,14 @@ export function App() {
       </div>
       <JobTable jobs={tabJobs} activeTab={activeTab} onSelectJob={setSelectedJob} />
       {selectedJob && (
-        <JobDetail job={selectedJob} onClose={() => setSelectedJob(null)} />
+        <JobDetail
+          job={selectedJob}
+          onClose={() => setSelectedJob(null)}
+          onJobUpdate={(updated) => {
+            setSelectedJob(updated);
+            setJobs((prev) => prev.map((j) => j.id === updated.id ? updated : j));
+          }}
+        />
       )}
       <CommandPanel
         isOpen={commandPanelOpen}
@@ -102,6 +129,10 @@ export function App() {
       <KeywordManager
         isOpen={keywordManagerOpen}
         onClose={() => setKeywordManagerOpen(false)}
+      />
+      <ProfileEditor
+        isOpen={profileOpen}
+        onClose={() => setProfileOpen(false)}
       />
     </div>
   );
