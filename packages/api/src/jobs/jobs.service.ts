@@ -39,6 +39,23 @@ export class JobsService {
     return job;
   }
 
+  updateJobStatus(id: string, status: string, reason?: string): any {
+    const filePath = this.getJobsFilePath();
+    const jobs = this.readAllRaw();
+    const job = jobs.find((j) => j.id === id);
+    if (!job) throw new NotFoundException(`Job ${id} not found`);
+
+    job.status = status;
+    if (reason) job.reason = reason;
+    if (status === 'applied') {
+      job.applied_at = new Date().toISOString();
+      job.applied_via = 'manual';
+    }
+
+    fs.writeFileSync(filePath, JSON.stringify(jobs, null, 2));
+    return job;
+  }
+
   async generateCoverLetter(id: string): Promise<{ cover_letter: string }> {
     const scraperDir = path.resolve(__dirname, '../../../scraper');
 

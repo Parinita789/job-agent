@@ -336,6 +336,7 @@ h1 {
 .platform.linkedin { background: var(--blue-dim); color: var(--blue); }
 .platform.greenhouse { background: var(--green-dim); color: var(--green); }
 .platform.lever { background: var(--orange-dim); color: var(--orange); }
+.platform.indeed { background: rgba(44, 94, 199, 0.15); color: #6b8de3; }
 
 /* Skill tags */
 .skills {
@@ -371,6 +372,82 @@ h1 {
 .apply-link:hover {
   background: var(--accent-glow);
   color: var(--accent-hover);
+}
+
+/* Apply actions */
+.apply-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.applied-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.applied-btn:hover {
+  color: var(--green);
+  background: var(--green-dim);
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+/* Applied info */
+.applied-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.applied-via {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.applied-via.auto {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+.applied-via.manual {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.applied-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Dismiss button */
+.dismiss-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 8px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.dismiss-btn:hover {
+  color: var(--red);
+  background: var(--red-dim);
+  border-color: rgba(248, 113, 113, 0.2);
 }
 
 /* Salary */
@@ -651,6 +728,95 @@ h1 {
   margin-left: auto;
 }
 
+/* Source Picker (nested under Scrape + Score) */
+.source-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 6px 42px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.source-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.source-item:hover {
+  background: var(--accent-glow);
+  color: var(--text);
+}
+
+.source-item input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  position: relative;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.source-item input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.source-item input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border: solid white;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.source-item input[type="checkbox"]:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pipeline-actions {
+  margin-top: 8px;
+}
+
+.stop-btn {
+  width: 100%;
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--red), #dc2626);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(248, 113, 113, 0.3);
+}
+
+.stop-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(248, 113, 113, 0.4);
+}
+
 .run-btn {
   margin-top: 8px;
   padding: 12px 24px;
@@ -680,8 +846,7 @@ h1 {
 /* Log Viewer */
 .log-viewer {
   flex: 1;
-  min-height: 250px;
-  max-height: 350px;
+  min-height: 300px;
   overflow-y: auto;
   margin: 0 28px 20px;
   padding: 14px 18px;

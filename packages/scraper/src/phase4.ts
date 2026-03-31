@@ -94,6 +94,7 @@ async function main() {
       if (jobInArray) {
         jobInArray.status = 'applied';
         (jobInArray as any).applied_at = new Date().toISOString();
+        (jobInArray as any).applied_via = 'auto';
       }
     } else if (result.reason.includes('No Easy Apply')) {
       console.log(`  SKIPPED: ${result.reason}`);

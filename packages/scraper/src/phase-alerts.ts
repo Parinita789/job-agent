@@ -51,7 +51,7 @@ async function scoreBatch(batch: JobListing[]): Promise<ScoredJob[]> {
   const promises = batch.map(async (job) => {
     try {
       const score = await scoreFitWithLLM(job);
-      return { ...job, ...score, status: score.apply ? 'to_apply' : 'rejected' } as ScoredJob;
+      return { ...job, ...score, status: score.fit_score >= 5 ? 'to_apply' : 'rejected' } as ScoredJob;
     } catch (err) {
       console.error(`  LLM failed for ${job.title}: ${(err as Error).message}`);
       return {
@@ -88,10 +88,12 @@ async function main() {
 
   // ── deduplicate ───────────────────────────────────────────────────
   const existingKeys = new Set(existing.map((j) => `${j.company}|||${j.title}`.toLowerCase()));
+  const existingUrls = new Set(existing.map((j) => j.url).filter(Boolean));
   const seenKeys = new Set<string>();
   const newJobs = alertJobs.filter((j) => {
     const key = `${j.company}|||${j.title}`.toLowerCase();
     if (existingIds.has(j.id) || existingKeys.has(key) || seenKeys.has(key)) return false;
+    if (j.url && existingUrls.has(j.url)) return false;
     seenKeys.add(key);
     return true;
   });

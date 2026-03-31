@@ -5,6 +5,7 @@ import { scrapeLinkedIn } from './scraper/linkedin';
 import { scrapeLinkedInAlerts } from './scraper/linkedin-alerts';
 import { scrapeGreenhouse } from './scraper/greenhouse';
 import { scrapeLever } from './scraper/lever';
+import { scrapeIndeed } from './scraper/indeed';
 import { checkDealBreakers } from './deal-breakers';
 import { scoreFitWithLLM } from './scorer/llm-scorer';
 import { TARGET_COMPANIES } from './scraper/company-list';
@@ -14,6 +15,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_FILE = path.join(__dirname, '../data/jobs.json');
 
 const LLM_CONCURRENCY = 2;
+
+const INDEED_QUERIES = [
+  { keywords: 'Backend Engineer Node.js', location: 'United States' },
+  { keywords: 'Senior Software Engineer TypeScript', location: 'United States' },
+  { keywords: 'Staff Software Engineer Backend', location: 'United States' },
+  { keywords: 'Software Engineer distributed systems', location: 'Remote' },
+];
+
+const INDEED_JOBS_PER_QUERY = 25;
 
 const LINKEDIN_QUERIES = [
   { keywords: 'Backend Engineer Node.js', location: 'United States' },
@@ -91,7 +101,7 @@ async function scoreBatch(
       return {
         ...job,
         ...score,
-        status: score.apply ? 'to_apply' : 'rejected',
+        status: score.fit_score >= 5 ? 'to_apply' : 'rejected',
       } as ScoredJob;
     } catch (err) {
       console.error(`  LLM failed for ${job.title}: ${(err as Error).message}`);
@@ -110,90 +120,138 @@ async function scoreBatch(
   return Promise.all(promises);
 }
 
-async function scrapeAllSources(): Promise<JobListing[]> {
+type Source = 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
+const ALL_SOURCES: Source[] = ['linkedin', 'greenhouse', 'lever', 'indeed'];
+
+async function scrapeAllSources(sources: Source[] = ALL_SOURCES): Promise<JobListing[]> {
   const all: JobListing[] = [];
+  const enabled = new Set(sources);
 
-  // ── Source 1: LinkedIn ──────────────────────────────────────────
-  console.log('━'.repeat(45));
-  console.log('SOURCE 1 — LinkedIn');
-  console.log('━'.repeat(45));
+  if (enabled.has('linkedin')) {
+    console.log('━'.repeat(45));
+    console.log('SOURCE — LinkedIn');
+    console.log('━'.repeat(45));
 
-  for (const query of LINKEDIN_QUERIES) {
-    console.log(`\nSearching: "${query.keywords}" in ${query.location}`);
+    for (const query of LINKEDIN_QUERIES) {
+      console.log(`\nSearching: "${query.keywords}" in ${query.location}`);
+      try {
+        const jobs = await scrapeLinkedIn(query.keywords, query.location, LINKEDIN_JOBS_PER_QUERY);
+        console.log(`  Got ${jobs.length} jobs`);
+        all.push(...jobs);
+      } catch (err) {
+        console.error(`  Failed: ${(err as Error).message}`);
+      }
+    }
+
+    console.log('\n' + '━'.repeat(45));
+    console.log('SOURCE — LinkedIn Job Alerts');
+    console.log('━'.repeat(45));
+
     try {
-      const jobs = await scrapeLinkedIn(query.keywords, query.location, LINKEDIN_JOBS_PER_QUERY);
-      console.log(`  Got ${jobs.length} jobs`);
-      all.push(...jobs);
+      const alertJobs = await scrapeLinkedInAlerts(50);
+      console.log(`  Got ${alertJobs.length} jobs from alerts`);
+      all.push(...alertJobs);
     } catch (err) {
-      console.error(`  Failed: ${(err as Error).message}`);
+      console.error(`  Alerts failed: ${(err as Error).message}`);
     }
   }
 
-  // ── Source 1b: LinkedIn Job Alerts ─────────────────────────────
-  console.log('\n' + '━'.repeat(45));
-  console.log('SOURCE 1b — LinkedIn Job Alerts');
-  console.log('━'.repeat(45));
+  if (enabled.has('greenhouse')) {
+    console.log('\n' + '━'.repeat(45));
+    console.log('SOURCE — Greenhouse');
+    console.log('━'.repeat(45) + '\n');
 
-  try {
-    const alertJobs = await scrapeLinkedInAlerts(50);
-    console.log(`  Got ${alertJobs.length} jobs from alerts`);
-    all.push(...alertJobs);
-  } catch (err) {
-    console.error(`  Alerts failed: ${(err as Error).message}`);
+    const greenhouseCompanies = TARGET_COMPANIES.filter((c) => c.ats === 'greenhouse');
+    console.log(`Scraping ${greenhouseCompanies.length} companies...\n`);
+
+    for (const company of greenhouseCompanies) {
+      const jobs = await scrapeGreenhouse(company.slug, company.name);
+      all.push(...jobs);
+    }
   }
 
-  // ── Source 2: Greenhouse ────────────────────────────────────────
-  console.log('\n' + '━'.repeat(45));
-  console.log('SOURCE 2 — Greenhouse');
-  console.log('━'.repeat(45) + '\n');
+  if (enabled.has('lever')) {
+    console.log('\n' + '━'.repeat(45));
+    console.log('SOURCE — Lever');
+    console.log('━'.repeat(45) + '\n');
 
-  const greenhouseCompanies = TARGET_COMPANIES.filter((c) => c.ats === 'greenhouse');
-  console.log(`Scraping ${greenhouseCompanies.length} companies...\n`);
+    const leverCompanies = TARGET_COMPANIES.filter((c) => c.ats === 'lever');
+    console.log(`Scraping ${leverCompanies.length} companies...\n`);
 
-  for (const company of greenhouseCompanies) {
-    const jobs = await scrapeGreenhouse(company.slug, company.name);
-    all.push(...jobs);
+    for (const company of leverCompanies) {
+      const jobs = await scrapeLever(company.slug, company.name);
+      all.push(...jobs);
+    }
   }
 
-  // ── Source 3: Lever ─────────────────────────────────────────────
-  console.log('\n' + '━'.repeat(45));
-  console.log('SOURCE 3 — Lever');
-  console.log('━'.repeat(45) + '\n');
+  if (enabled.has('indeed')) {
+    console.log('\n' + '━'.repeat(45));
+    console.log('SOURCE — Indeed');
+    console.log('━'.repeat(45));
 
-  const leverCompanies = TARGET_COMPANIES.filter((c) => c.ats === 'lever');
-  console.log(`Scraping ${leverCompanies.length} companies...\n`);
-
-  for (const company of leverCompanies) {
-    const jobs = await scrapeLever(company.slug, company.name);
-    all.push(...jobs);
+    const indeedSeen = new Set<string>();
+    for (const query of INDEED_QUERIES) {
+      console.log(`\nSearching: "${query.keywords}" in ${query.location}`);
+      try {
+        const jobs = await scrapeIndeed(query.keywords, query.location, INDEED_JOBS_PER_QUERY);
+        // Dedup across queries by id
+        const newJobs = jobs.filter((j) => {
+          if (indeedSeen.has(j.id)) return false;
+          indeedSeen.add(j.id);
+          return true;
+        });
+        console.log(`  Got ${jobs.length} jobs (${jobs.length - newJobs.length} cross-query dupes)`);
+        all.push(...newJobs);
+      } catch (err) {
+        console.error(`  Failed: ${(err as Error).message}`);
+      }
+    }
   }
 
   return all;
 }
 
 async function main() {
+  // Parse --sources flag: e.g. --sources linkedin,greenhouse
+  const sourcesArg = process.argv.find((a) => a.startsWith('--sources='));
+  const sources: Source[] = sourcesArg
+    ? (sourcesArg.split('=')[1].split(',') as Source[])
+    : ALL_SOURCES;
+
   console.log('Phase 2 — Multi-Source Job Scraper');
-  console.log('LinkedIn + Greenhouse + Lever');
+  console.log(`Sources: ${sources.join(', ')}`);
   console.log('=====================================\n');
 
   const existingJobs = loadExistingJobs();
   const existingIds = new Set(existingJobs.map((j) => j.id));
   console.log(`Existing jobs in tracker: ${existingJobs.length}\n`);
 
-  // ── scrape all sources ─────────────────────────────────────────────
-  const allRawJobs = await scrapeAllSources();
+  // ── scrape selected sources ────────────────────────────────────────
+  const allRawJobs = await scrapeAllSources(sources);
 
   // ── deduplicate ────────────────────────────────────────────────────
   const seenIds = new Set<string>();
   const seenKeys = new Set(existingJobs.map((j) => `${j.company}|||${j.title}`.toLowerCase()));
+  const seenUrls = new Set(existingJobs.map((j) => j.url).filter(Boolean));
   const uniqueNewJobs = allRawJobs.filter((job) => {
     const key = `${job.company}|||${job.title}`.toLowerCase();
     if (seenIds.has(job.id) || existingIds.has(job.id)) return false;
     if (seenKeys.has(key)) return false;
+    if (job.url && seenUrls.has(job.url)) return false;
     seenIds.add(job.id);
     seenKeys.add(key);
+    if (job.url) seenUrls.add(job.url);
     return true;
   });
+
+  // Log dedup breakdown by reason
+  let dupById = 0, dupByKey = 0, dupByUrl = 0;
+  for (const job of allRawJobs) {
+    const key = `${job.company}|||${job.title}`.toLowerCase();
+    if (existingIds.has(job.id)) { dupById++; continue; }
+    if (seenKeys.has(key) && !seenIds.has(job.id)) { dupByKey++; continue; }
+    if (job.url && seenUrls.has(job.url) && !seenIds.has(job.id)) { dupByUrl++; continue; }
+  }
 
   console.log('\n' + '━'.repeat(45));
   console.log('SCRAPE COMPLETE');
@@ -201,6 +259,11 @@ async function main() {
   console.log(`Total scraped:   ${allRawJobs.length}`);
   console.log(`After dedup:     ${uniqueNewJobs.length}`);
   console.log(`Already tracked: ${allRawJobs.length - uniqueNewJobs.length}`);
+  if (allRawJobs.length - uniqueNewJobs.length > 0) {
+    console.log(`  - by ID:           ${dupById}`);
+    console.log(`  - by company+title: ${dupByKey}`);
+    console.log(`  - by URL:          ${dupByUrl}`);
+  }
 
   if (uniqueNewJobs.length === 0) {
     console.log('\nNo new jobs to process.');
@@ -267,7 +330,7 @@ async function main() {
       const scored = await scoreBatch(batch);
 
       for (const s of scored) {
-        console.log(`  ${s.fit_score}/10 ${s.apply ? '✓' : '✗'} ${s.title} @ ${s.company}`);
+        console.log(`  ${s.fit_score}/10 ${s.fit_score >= 5 ? '✓' : '✗'} ${s.title} @ ${s.company}`);
         results.push(s);
       }
 

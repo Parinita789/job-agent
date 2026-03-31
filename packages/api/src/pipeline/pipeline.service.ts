@@ -1,5 +1,5 @@
 import { Injectable, ConflictException } from '@nestjs/common';
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
 
 export interface PipelineState {
@@ -64,6 +64,9 @@ const COMMANDS: Record<string, { label: string; phases: { name: string; cmd: str
 
 @Injectable()
 export class PipelineService {
+  private currentChild: ChildProcess | null = null;
+  private cancelled = false;
+
   private state: PipelineState = {
     running: false,
     phase: null,
@@ -121,13 +124,21 @@ export class PipelineService {
     this.runPhasesSequentially(command.phases, scraperDir);
   }
 
-  async runSelectedPhases(phaseIds: string[]): Promise<void> {
+  async runSelectedPhases(phaseIds: string[], scrapeSources?: string[]): Promise<void> {
     if (this.state.running) {
       throw new ConflictException('A command is already running');
     }
 
     const phases = phaseIds
-      .map((id) => PHASE_LIST.find((p) => p.id === id))
+      .map((id) => {
+        const phase = PHASE_LIST.find((p) => p.id === id);
+        if (!phase) return null;
+        // Append --sources flag to scrape phase if sources specified
+        if (id === 'scrape' && scrapeSources && scrapeSources.length > 0) {
+          return { ...phase, args: [...phase.args, `--sources=${scrapeSources.join(',')}`] };
+        }
+        return phase;
+      })
       .filter(Boolean) as typeof PHASE_LIST;
 
     if (phases.length === 0) {
@@ -153,6 +164,23 @@ export class PipelineService {
     this.runPhasesSequentially(phases, scraperDir);
   }
 
+  stopPipeline(): void {
+    if (!this.state.running) return;
+    this.cancelled = true;
+    if (this.currentChild) {
+      this.currentChild.kill('SIGTERM');
+      // Force kill after 3s if still alive
+      setTimeout(() => {
+        if (this.currentChild) this.currentChild.kill('SIGKILL');
+      }, 3000);
+    }
+    this.addLog('--- Pipeline stopped by user ---');
+    this.state.running = false;
+    this.state.phase = null;
+    this.state.error = 'Stopped by user';
+    this.state.lastRunAt = new Date().toISOString();
+  }
+
   private addLog(line: string) {
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
     this.state.logs.push(`[${timestamp}] ${line}`);
@@ -165,14 +193,20 @@ export class PipelineService {
     phases: { name: string; cmd: string; args: string[] }[],
     cwd: string,
   ): Promise<void> {
+    this.cancelled = false;
+
     for (const phase of phases) {
+      if (this.cancelled) return;
+
       this.state.phase = phase.name;
       this.addLog(`Phase: ${phase.name}`);
 
       try {
         await this.spawnWithLogs(phase.cmd, phase.args, cwd);
+        if (this.cancelled) return;
         this.addLog(`Phase "${phase.name}" completed`);
       } catch (err) {
+        if (this.cancelled) return;
         const msg = (err as Error).message;
         this.state.error = `${phase.name} failed: ${msg}`;
         this.addLog(`ERROR: ${phase.name} failed — ${msg}`);
@@ -196,6 +230,8 @@ export class PipelineService {
         env: { ...process.env, FORCE_COLOR: '0' },
       });
 
+      this.currentChild = child;
+
       child.stdout.on('data', (data: Buffer) => {
         const lines = data.toString().split('\n').filter(Boolean);
         for (const line of lines) {
@@ -211,7 +247,10 @@ export class PipelineService {
       });
 
       child.on('close', (code) => {
-        if (code === 0) {
+        this.currentChild = null;
+        if (this.cancelled) {
+          resolve();
+        } else if (code === 0) {
           resolve();
         } else {
           reject(new Error(`Process exited with code ${code}`));
@@ -219,6 +258,7 @@ export class PipelineService {
       });
 
       child.on('error', (err) => {
+        this.currentChild = null;
         reject(err);
       });
 

@@ -9,7 +9,7 @@ import { KeywordManager } from './keyword-manager';
 import { ProfileEditor } from './profile-editor';
 
 type Tab = 'queue' | 'applied' | 'rejected';
-type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever';
+type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('queue');
@@ -50,6 +50,27 @@ export function App() {
     const interval = setInterval(fetchJobs, 30000);
     return () => clearInterval(interval);
   }, [fetchJobs]);
+
+  const handleDismissJob = useCallback(async (job: ScoredJob) => {
+    try {
+      await axios.patch(`/api/jobs/${job.id}/status`, {
+        status: 'rejected',
+        reason: 'Posting no longer available',
+      });
+      setJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, status: 'rejected' as const, reason: 'Posting no longer available' } : j));
+    } catch (err) {
+      console.error('Failed to dismiss job:', err);
+    }
+  }, []);
+
+  const handleMarkApplied = useCallback(async (job: ScoredJob) => {
+    try {
+      await axios.patch(`/api/jobs/${job.id}/status`, { status: 'applied' });
+      setJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, status: 'applied' as const, applied_at: new Date().toISOString() } : j));
+    } catch (err) {
+      console.error('Failed to mark applied:', err);
+    }
+  }, []);
 
   const filtered = platformFilter === 'all' ? jobs : jobs.filter((j) => j.source === platformFilter);
   const queue = filtered.filter((j) => j.status === 'to_apply');
@@ -100,7 +121,7 @@ export function App() {
         onOpenKeywords={() => setKeywordManagerOpen(true)}
       />
       <div className="platform-filter">
-        {(['all', 'linkedin', 'greenhouse', 'lever'] as PlatformFilter[]).map((p) => (
+        {(['all', 'linkedin', 'greenhouse', 'lever', 'indeed'] as PlatformFilter[]).map((p) => (
           <button
             key={p}
             className={`filter-btn ${platformFilter === p ? 'active' : ''}`}
@@ -110,7 +131,7 @@ export function App() {
           </button>
         ))}
       </div>
-      <JobTable jobs={tabJobs} activeTab={activeTab} onSelectJob={setSelectedJob} />
+      <JobTable jobs={tabJobs} activeTab={activeTab} onSelectJob={setSelectedJob} onDismissJob={handleDismissJob} onMarkApplied={handleMarkApplied} />
       {selectedJob && (
         <JobDetail
           job={selectedJob}

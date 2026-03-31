@@ -16,8 +16,8 @@ export class PipelineController {
   }
 
   @Post('run-phases')
-  async runPhases(@Body('phases') phases: string[]) {
-    await this.pipelineService.runSelectedPhases(phases);
+  async runPhases(@Body() body: { phases: string[]; scrapeSources?: string[] }) {
+    await this.pipelineService.runSelectedPhases(body.phases, body.scrapeSources);
     return { message: 'Pipeline started' };
   }
 
@@ -32,6 +32,12 @@ export class PipelineController {
   async runPipeline() {
     await this.pipelineService.runCommand('pipeline');
     return { message: 'Pipeline started' };
+  }
+
+  @Post('stop')
+  stopPipeline() {
+    this.pipelineService.stopPipeline();
+    return { message: 'Pipeline stopped' };
   }
 
   @Get('status')

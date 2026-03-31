@@ -1,4 +1,3 @@
-import React from 'react';
 import type { ScoredJob } from '../types';
 
 type Tab = 'queue' | 'applied' | 'rejected';
@@ -7,6 +6,8 @@ interface JobTableProps {
   jobs: ScoredJob[];
   activeTab: Tab;
   onSelectJob: (job: ScoredJob) => void;
+  onDismissJob?: (job: ScoredJob) => void;
+  onMarkApplied?: (job: ScoredJob) => void;
 }
 
 function formatSalary(min?: number, max?: number): string {
@@ -22,7 +23,7 @@ function scoreClass(score: number): string {
   return 'low';
 }
 
-export function JobTable({ jobs, activeTab, onSelectJob }: JobTableProps) {
+export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApplied }: JobTableProps) {
   if (jobs.length === 0) {
     return (
       <div className="empty-state">
@@ -46,6 +47,7 @@ export function JobTable({ jobs, activeTab, onSelectJob }: JobTableProps) {
           {activeTab === 'applied' && <th>Applied</th>}
           {activeTab === 'rejected' && <th>Reason</th>}
           {activeTab === 'queue' && <th>Apply</th>}
+          {activeTab === 'queue' && <th></th>}
         </tr>
       </thead>
       <tbody>
@@ -79,10 +81,15 @@ export function JobTable({ jobs, activeTab, onSelectJob }: JobTableProps) {
               <span className={`platform ${job.source}`}>{job.source}</span>
             </td>
             {activeTab === 'applied' && (
-              <td style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                {job.applied_at
-                  ? new Date(job.applied_at).toLocaleDateString()
-                  : '--'}
+              <td>
+                <div className="applied-info">
+                  <span className={`applied-via ${job.applied_via || 'manual'}`}>
+                    {job.applied_via === 'auto' ? 'Auto' : 'Manual'}
+                  </span>
+                  <span className="applied-date">
+                    {job.applied_at ? new Date(job.applied_at).toLocaleDateString() : '--'}
+                  </span>
+                </div>
               </td>
             )}
             {activeTab === 'rejected' && (
@@ -94,15 +101,41 @@ export function JobTable({ jobs, activeTab, onSelectJob }: JobTableProps) {
             )}
             {activeTab === 'queue' && (
               <td>
-                <a
-                  className="apply-link"
-                  href={job.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
+                <div className="apply-actions">
+                  <a
+                    className="apply-link"
+                    href={job.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Apply
+                  </a>
+                  <button
+                    className="applied-btn"
+                    title="Mark as applied"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMarkApplied?.(job);
+                    }}
+                  >
+                    Applied
+                  </button>
+                </div>
+              </td>
+            )}
+            {activeTab === 'queue' && (
+              <td>
+                <button
+                  className="dismiss-btn"
+                  title="Mark as expired / not available"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDismissJob?.(job);
+                  }}
                 >
-                  Apply
-                </a>
+                  &times;
+                </button>
               </td>
             )}
           </tr>

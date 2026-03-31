@@ -1,4 +1,4 @@
-export type JobSource = 'linkedin' | 'greenhouse' | 'lever';
+export type JobSource = 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
 export type JobStatus = 'to_apply' | 'applied' | 'rejected' | 'no_response' | 'interviewing';
 
 export interface ScoredJob {
@@ -22,6 +22,7 @@ export interface ScoredJob {
   deal_breaker?: string;
   status: JobStatus;
   applied_at?: string;
+  applied_via?: 'auto' | 'manual';
   cover_letter?: string;
   notes?: string;
 }

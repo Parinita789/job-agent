@@ -83,19 +83,11 @@ ${job.reason}
 "I am thrilled", "I am excited", "I am passionate", "I am confident"
 
 ## Instructions — follow exactly
-- Write exactly 3 paragraphs
-- Paragraph 1: Open with a specific problem this company faces that the candidate has already solved.
-  Do NOT start with "I am", "As a", or any first-person opener.
-  Start with the company's challenge, pivot to candidate's solution in sentence 2.
-- Paragraph 2: Lead with the metric, not "I did X".
-  Use BOTH achievements above with exact numbers.
-  e.g. "60% efficiency gains came from..." not "I increased efficiency by 60%"
-- Paragraph 3: Name ONE specific technical thing about this company
-  (their stack, product, or scale challenge) that connects to candidate's exact experience.
-  End with a single direct sentence asking for a conversation.
-  e.g. "I'd welcome a conversation about [specific thing]."
-- Under 280 words total
-- Tone: direct and senior, not eager or grateful
+- Write exactly 2 short paragraphs, maximum 4 sentences each
+- Paragraph 1: One sentence on what the company needs, then 2 sentences proving the candidate has done it — use ONE achievement with the exact metric.
+- Paragraph 2: Connect one specific thing about the company's stack/product to the candidate's experience. End with a single sentence asking for a conversation.
+- Under 150 words total. Every sentence must earn its place.
+- Tone: direct, confident, senior. No filler, no fluff.
 
 ## Banned phrases — do NOT use any of these
 "I am thrilled", "I am excited", "I am passionate", "I am confident",
@@ -103,9 +95,11 @@ ${job.reason}
 "make an immediate impact", "I'd love to", "Let's schedule",
 "would be beneficial", "I look forward to", "Please consider",
 "I am writing to", "strong passion", "dream company",
-"I am impressed by", "I am drawn to"
+"I am impressed by", "I am drawn to", "resonates with",
+"eager to leverage", "I am eager", "ideal candidate",
+"honed my skills", "positions me as"
 
-Write ONLY the cover letter body. No subject line, no date, no greeting, no signature.
+Write the cover letter body with "Dear Hiring Manager," at the top and a brief professional sign-off with the candidate's name at the end. No subject line, no date.
 `.trim();
 }
 
@@ -115,7 +109,7 @@ export async function generateCoverLetter(job: ScoredJob): Promise<string> {
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 600,
+    max_tokens: 350,
     messages: [{ role: 'user', content: prompt }],
   });
 

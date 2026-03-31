@@ -54,7 +54,7 @@ async function scoreBatch(batch: JobListing[]): Promise<ScoredJob[]> {
       return {
         ...job,
         ...score,
-        status: score.apply ? 'to_apply' : 'rejected',
+        status: score.fit_score >= 5 ? 'to_apply' : 'rejected',
       } as ScoredJob;
     } catch (err) {
       console.error(`  LLM failed for ${job.title}: ${(err as Error).message}`);
