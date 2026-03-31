@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { PATHS } from '../config';
 import type { ScoredJob } from '../types';
 import { handleFormFields } from './form-handler';
+import { setCurrentJob } from '../scorer/question-answerer';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const randomDelay = () => sleep(1500 + Math.random() * 2000);
@@ -42,6 +43,7 @@ export async function applyViaEasyApply(page: Page, job: ScoredJob): Promise<App
     }
 
     console.log('  Easy Apply button found — opening form...');
+    setCurrentJob({ id: job.id, title: job.title, company: job.company });
     await easyApplyBtn.click();
     await randomDelay();
 

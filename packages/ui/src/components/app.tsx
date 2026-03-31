@@ -7,6 +7,7 @@ import { JobDetail } from './job-detail';
 import { CommandPanel } from './command-panel';
 import { KeywordManager } from './keyword-manager';
 import { ProfileEditor } from './profile-editor';
+import { FormAnswers } from './form-answers';
 
 type Tab = 'queue' | 'applied' | 'rejected';
 type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
@@ -18,6 +19,7 @@ export function App() {
   const [commandPanelOpen, setCommandPanelOpen] = useState(false);
   const [keywordManagerOpen, setKeywordManagerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [formAnswersOpen, setFormAnswersOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
@@ -42,8 +44,6 @@ export function App() {
 
   const handleCommandComplete = useCallback(async () => {
     await fetchJobs();
-    setCommandPanelOpen(false);
-    setActiveTab('queue');
   }, [fetchJobs]);
 
   useEffect(() => {
@@ -105,6 +105,9 @@ export function App() {
                 <button onClick={() => { setKeywordManagerOpen(true); setMenuOpen(false); }}>
                   Keywords
                 </button>
+                <button onClick={() => { setFormAnswersOpen(true); setMenuOpen(false); }}>
+                  Form Answers
+                </button>
                 <button onClick={() => { setCommandPanelOpen(true); setMenuOpen(false); }}>
                   Pipeline
                 </button>
@@ -154,6 +157,10 @@ export function App() {
       <ProfileEditor
         isOpen={profileOpen}
         onClose={() => setProfileOpen(false)}
+      />
+      <FormAnswers
+        isOpen={formAnswersOpen}
+        onClose={() => setFormAnswersOpen(false)}
       />
     </div>
   );

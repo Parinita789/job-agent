@@ -14,6 +14,7 @@
     "scraper:phase3": "npm run phase3 -w packages/scraper",
     "scraper:phase3:force": "npm run phase3:force -w packages/scraper",
     "scraper:alerts": "npm run alerts -w packages/scraper",
+    "scraper:email-alerts": "npx tsx packages/scraper/src/phase-email-alerts.ts",
     "scraper:phase4": "npm run phase4 -w packages/scraper",
     "api": "npm run start:dev -w packages/api",
     "ui": "npm run dev -w packages/ui",

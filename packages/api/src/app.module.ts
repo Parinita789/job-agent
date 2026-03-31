@@ -4,6 +4,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { ProfileModule } from './profile/profile.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { AlertsModule } from './alerts/alerts.module';
+import { FormAnswersModule } from './form-answers/form-answers.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { AlertsModule } from './alerts/alerts.module';
     ProfileModule,
     PipelineModule,
     AlertsModule,
+    FormAnswersModule,
   ],
 })
 export class AppModule {}

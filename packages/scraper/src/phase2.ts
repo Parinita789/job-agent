@@ -17,27 +17,34 @@ const DATA_FILE = path.join(__dirname, '../data/jobs.json');
 const LLM_CONCURRENCY = 2;
 
 const INDEED_QUERIES = [
-  { keywords: 'Backend Engineer Node.js', location: 'United States' },
-  { keywords: 'Senior Software Engineer TypeScript', location: 'United States' },
-  { keywords: 'Staff Software Engineer Backend', location: 'United States' },
-  { keywords: 'Software Engineer distributed systems', location: 'Remote' },
+  { keywords: 'Senior Backend Engineer Node.js', location: 'United States' },
+  { keywords: 'Senior Software Engineer Backend', location: 'United States' },
+  { keywords: 'Software Engineer Platform TypeScript', location: 'United States' },
+  { keywords: 'Backend Software Engineer AWS', location: 'United States' },
 ];
 
 const INDEED_JOBS_PER_QUERY = 25;
 
 const LINKEDIN_QUERIES = [
-  { keywords: 'Backend Engineer Node.js', location: 'United States' },
+  // Core backend roles
   { keywords: 'Senior Backend Engineer', location: 'United States' },
+  { keywords: 'Senior Software Engineer Backend', location: 'United States' },
+  { keywords: 'Backend Software Engineer', location: 'United States' },
   { keywords: 'Staff Backend Engineer', location: 'United States' },
-  { keywords: 'Software Engineer TypeScript', location: 'United States' },
+  // Node.js / TypeScript specific
   { keywords: 'Senior Software Engineer Node.js', location: 'United States' },
-  { keywords: 'Platform Engineer Node.js', location: 'United States' },
-  { keywords: 'Backend Engineer TypeScript', location: 'Remote' },
+  { keywords: 'Node.js Backend Developer', location: 'United States' },
+  { keywords: 'Software Engineer TypeScript', location: 'United States' },
+  // Platform / Product engineering
+  { keywords: 'Software Engineer Platform', location: 'United States' },
+  { keywords: 'Software Engineer Product Backend', location: 'United States' },
+  { keywords: 'Software Development Engineer', location: 'United States' },
+  // Remote + Bay Area
+  { keywords: 'Senior Backend Engineer', location: 'Remote' },
   { keywords: 'Senior Software Engineer Backend', location: 'San Francisco Bay Area' },
-  { keywords: 'Staff Software Engineer Backend', location: 'San Francisco Bay Area' },
-  { keywords: 'Backend Engineer AWS microservices', location: 'United States' },
-  { keywords: 'Senior Backend Engineer API', location: 'United States' },
+  // Infrastructure / Systems
   { keywords: 'Software Engineer distributed systems', location: 'United States' },
+  { keywords: 'Backend Engineer AWS microservices', location: 'United States' },
 ];
 
 const LINKEDIN_JOBS_PER_QUERY = 25;

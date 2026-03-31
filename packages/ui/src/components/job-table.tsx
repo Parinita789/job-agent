@@ -32,7 +32,16 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
     );
   }
 
-  const sorted = [...jobs].sort((a, b) => b.fit_score - a.fit_score);
+  const sorted = [...jobs].sort((a, b) => {
+    // New jobs first (scraped within last 24h), then by score
+    const now = Date.now();
+    const aNew = now - new Date(a.scraped_at).getTime() < 86400000 ? 1 : 0;
+    const bNew = now - new Date(b.scraped_at).getTime() < 86400000 ? 1 : 0;
+    if (bNew !== aNew) return bNew - aNew;
+    return b.fit_score - a.fit_score;
+  });
+
+  const isNew = (scraped_at: string) => Date.now() - new Date(scraped_at).getTime() < 86400000;
 
   return (
     <table className="job-table">
@@ -58,7 +67,10 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
                 {job.fit_score}
               </span>
             </td>
-            <td>{job.company}</td>
+            <td>
+              {job.company}
+              {isNew(job.scraped_at) && <span className="new-badge">New</span>}
+            </td>
             <td>{job.title}</td>
             <td>
               <span className="salary">

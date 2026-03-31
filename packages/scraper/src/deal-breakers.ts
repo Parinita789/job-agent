@@ -28,19 +28,20 @@ export function checkDealBreakers(job: JobListing): { rejected: boolean; reason?
   }
 
   // Rule 3 — frontend-heavy detection
+  // Only reject pure frontend roles (not full stack)
   const frontendSignals = [
-    'react developer',
-    'vue developer',
-    'angular developer',
     'frontend engineer',
     'front-end engineer',
-    'css',
+    'css specialist',
     'figma',
     'pixel-perfect',
+    'ui/ux engineer',
   ];
   const descLower = job.description.toLowerCase();
+  const titleLower = job.title.toLowerCase();
+  const isFullStack = titleLower.includes('full stack') || titleLower.includes('fullstack');
   const hits = frontendSignals.filter((kw) => descLower.includes(kw));
-  if (hits.length >= 3) {
+  if (hits.length >= 3 && !isFullStack) {
     return {
       rejected: true,
       reason: `Frontend-heavy role detected (${hits.join(', ')})`,
