@@ -10,6 +10,11 @@ export class JobsController {
     return this.jobsService.getAllJobs();
   }
 
+  @Get('cover-letters')
+  getCoverLetters() {
+    return this.jobsService.getJobsWithCoverLetters();
+  }
+
   @Get(':id')
   getJobById(@Param('id') id: string) {
     return this.jobsService.getJobById(id);

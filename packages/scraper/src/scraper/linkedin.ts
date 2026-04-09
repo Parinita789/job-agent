@@ -11,6 +11,28 @@ const randomDelay = () => sleep(2000 + Math.random() * 3000);
 
 const SESSION_FILE = path.join(__dirname, '../../data/linkedin-session.json');
 
+function parsePostedDate(text: string): string | undefined {
+  if (!text) return undefined;
+
+  // If it's an ISO date (from datetime attribute)
+  if (text.match(/^\d{4}-\d{2}-\d{2}/)) return new Date(text).toISOString();
+
+  // Parse relative dates like "2 days ago", "1 week ago", "3 hours ago"
+  const match = text.match(/(\d+)\s*(second|minute|hour|day|week|month)s?\s*ago/i);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+    const now = new Date();
+    const ms: Record<string, number> = {
+      second: 1000, minute: 60000, hour: 3600000,
+      day: 86400000, week: 604800000, month: 2592000000,
+    };
+    return new Date(now.getTime() - num * (ms[unit] || 0)).toISOString();
+  }
+
+  return undefined;
+}
+
 function buildLinkedInURL(keywords: string, location: string): string {
   const base = 'https://www.linkedin.com/jobs/search';
   const params = new URLSearchParams({
@@ -382,6 +404,16 @@ export async function scrapeLinkedIn(
           .toLowerCase()
           .includes('remote');
 
+        // ── extract posted date ────────────────────────────────────────
+        const postedText = await card
+          .$eval(
+            'time, .job-card-container__listed-time, .job-card-list__date, [class*="listed-time"]',
+            (el: Element) => (el as HTMLTimeElement).dateTime || el.textContent?.trim() || '',
+          )
+          .catch(() => '');
+
+        const postedAt = parsePostedDate(postedText);
+
         console.log(`  Description: ${description.length} chars`);
         console.log(`  Salary: ${salaryText || 'not listed'}`);
 
@@ -402,6 +434,7 @@ export async function scrapeLinkedIn(
           url: jobUrl,
           source: 'linkedin',
           scraped_at: new Date().toISOString(),
+          posted_at: postedAt,
         });
       } catch (err) {
         console.error(`  Skipped card ${i + 1}:`, (err as Error).message);

@@ -6,7 +6,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "paths": {
-      "@job-agent/shared": ["../shared/src/index.ts"]
+      "@job-agent/shared": ["../shared/dist/index"]
     }
   },
   "include": ["src/**/*"]

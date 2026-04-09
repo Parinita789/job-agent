@@ -1,34 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
+import { QuestionAnswerModel, ProfileAnswerModel } from '@job-agent/shared';
 
 @Injectable()
 export class FormAnswersService {
-  private getFormAnswersPath(): string {
-    return path.resolve(__dirname, '../../../scraper/data/form-answers.json');
+  async getFormAnswers(): Promise<any[]> {
+    return QuestionAnswerModel.find().sort({ appliedAt: -1 }).lean();
   }
 
-  private getRulesPath(): string {
-    return path.resolve(__dirname, '../../../scraper/data/answer-rules.json');
-  }
-
-  // ── Form answer logs ──
-
-  getFormAnswers(): any[] {
-    const filePath = this.getFormAnswersPath();
-    if (!fs.existsSync(filePath)) return [];
-    try {
-      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    } catch {
-      return [];
-    }
-  }
-
-  // ── Rule-based answers ──
-
-  getRules(): Record<string, string> {
-    const filePath = this.getRulesPath();
-    if (!fs.existsSync(filePath)) {
+  async getRules(): Promise<Record<string, string>> {
+    const rules = await ProfileAnswerModel.find().lean();
+    if (rules.length === 0) {
       // Return defaults
       return {
         'authorized to work': 'Yes',
@@ -47,17 +28,23 @@ export class FormAnswersService {
         'willing to relocate': 'Yes',
       };
     }
-    try {
-      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    } catch {
-      return {};
-    }
+    return rules.reduce((acc, r) => {
+      acc[r.question_pattern] = r.answer;
+      return acc;
+    }, {} as Record<string, string>);
   }
 
-  saveRules(rules: Record<string, string>): Record<string, string> {
-    const filePath = this.getRulesPath();
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(rules, null, 2));
+  async saveRules(rules: Record<string, string>): Promise<Record<string, string>> {
+    // Clear and re-insert all rules
+    await ProfileAnswerModel.deleteMany({});
+    const docs = Object.entries(rules).map(([question_pattern, answer]) => ({
+      question_pattern,
+      answer,
+      source: 'manual',
+    }));
+    if (docs.length > 0) {
+      await ProfileAnswerModel.insertMany(docs);
+    }
     return rules;
   }
 }

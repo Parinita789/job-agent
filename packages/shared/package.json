@@ -11,6 +11,8 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
-    "mongoose": "^8.0.0"
+    "mongoose": "^8.0.0",
+    "@anthropic-ai/sdk": "^0.80.0",
+    "openai": "^4.0.0"
   }
 }

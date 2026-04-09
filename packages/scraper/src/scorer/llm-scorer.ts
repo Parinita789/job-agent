@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropicClient } from '@job-agent/shared';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
@@ -7,8 +7,6 @@ import type { JobListing } from '../types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../../../../.env') });
-
-const client = new Anthropic();
 
 const profile = JSON.parse(
   fs.readFileSync(path.join(__dirname, '../../profile/candidate.json'), 'utf-8'),
@@ -139,7 +137,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function callWithRetry(prompt: string, retries = 3): Promise<string> {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const response = await client.messages.create({
+      const response = await getAnthropicClient().messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 300,
         messages: [{ role: 'user', content: prompt }],

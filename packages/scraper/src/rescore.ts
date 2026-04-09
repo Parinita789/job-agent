@@ -1,13 +1,8 @@
-// src/rescore.ts — re-scores existing jobs.json without scraping again
-import * as fs from "fs";
-import * as path from "path";
+// src/rescore.ts — re-scores existing jobs without scraping again
 import { checkDealBreakers } from "./deal-breakers";
 import { scoreFitWithLLM } from "./scorer/llm-scorer";
+import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJobs } from "./db";
 import type { ScoredJob, JobListing } from "./types";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, "../data/jobs.json");
 
 const LLM_CONCURRENCY = 2;
 
@@ -73,17 +68,16 @@ async function scoreBatch(batch: JobListing[]): Promise<ScoredJob[]> {
   return Promise.all(promises);
 }
 
-function saveJobs(jobs: ScoredJob[]) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(jobs, null, 2));
-}
-
 async function rescore() {
-  if (!fs.existsSync(DATA_FILE)) {
-    console.error("No jobs.json found. Run phase 2 first to scrape jobs.");
+  await connectToDatabase();
+
+  const existing = await loadExistingJobs();
+
+  if (existing.length === 0) {
+    console.error("No jobs found in database. Run phase 2 first to scrape jobs.");
+    await disconnectDatabase();
     process.exit(1);
   }
-
-  const existing: ScoredJob[] = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
 
   console.log("Rescore — Re-scoring with optimized pipeline");
   console.log(`Jobs to re-score: ${existing.length}\n`);
@@ -151,11 +145,11 @@ async function rescore() {
       }
 
       // save after each batch so progress isn't lost
-      saveJobs(results);
+      await saveJobs(results);
       console.log(`  Saved. Progress: ${results.length}/${existing.length}\n`);
     }
   } else {
-    saveJobs(results);
+    await saveJobs(results);
   }
 
   // ── Final summary ─────────────────────────────────────────────────
@@ -181,7 +175,9 @@ async function rescore() {
       );
   }
 
-  console.log(`\nSaved to: data/jobs.json`);
+  console.log(`\nSaved to database.`);
+
+  await disconnectDatabase();
 }
 
 rescore().catch(console.error);

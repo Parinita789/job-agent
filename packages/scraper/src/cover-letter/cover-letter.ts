@@ -1,23 +1,23 @@
-import Anthropic from '@anthropic-ai/sdk';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import { getAnthropicClient } from '@job-agent/shared';
+import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJob, saveCoverLetter, loadProfile } from '../db';
 import type { ScoredJob } from '../types';
 
 dotenv.config({ path: path.join(__dirname, '../../../../.env') });
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+let profile: any = null;
 
-const profile = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../../profile/candidate.json'), 'utf-8'),
-);
-
-const DATA_FILE = path.join(__dirname, '../../data/jobs.json');
+async function getProfile() {
+  if (!profile) {
+    profile = await loadProfile();
+  }
+  return profile;
+}
 
 // ── Relevance selector ────────────────────────────────────────────────────────
-function selectRelevantAchievements(job: ScoredJob): string[] {
+async function selectRelevantAchievements(job: ScoredJob): Promise<string[]> {
+  const profile = await getProfile();
   const descLower = job.description.toLowerCase();
 
   const isScaleRole = ['transaction', 'payment', 'latency', 'api', 'sla', 'scale'].some((k) =>
@@ -47,8 +47,9 @@ function selectRelevantAchievements(job: ScoredJob): string[] {
 }
 
 // ── Prompt builder ────────────────────────────────────────────────────────────
-function buildCoverLetterPrompt(job: ScoredJob): string {
-  const achievements = selectRelevantAchievements(job);
+async function buildCoverLetterPrompt(job: ScoredJob): Promise<string> {
+  const profile = await getProfile();
+  const achievements = await selectRelevantAchievements(job);
 
   return `
 You are writing a cover letter for a senior software engineer job application.
@@ -105,9 +106,9 @@ Write the cover letter body with "Dear Hiring Manager," at the top and a brief p
 
 // ── Single cover letter ───────────────────────────────────────────────────────
 export async function generateCoverLetter(job: ScoredJob): Promise<string> {
-  const prompt = buildCoverLetterPrompt(job);
+  const prompt = await buildCoverLetterPrompt(job);
 
-  const message = await anthropic.messages.create({
+  const message = await getAnthropicClient().messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 350,
     messages: [{ role: 'user', content: prompt }],
@@ -118,7 +119,9 @@ export async function generateCoverLetter(job: ScoredJob): Promise<string> {
 
 // ── Batch cover letter generator ──────────────────────────────────────────────
 export async function generateAllCoverLetters(minScore: number, force = false): Promise<void> {
-  const jobs: ScoredJob[] = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+  await connectToDatabase();
+
+  const jobs: ScoredJob[] = await loadExistingJobs();
 
   const eligible = jobs.filter(
     (j) => j.fit_score >= minScore && j.status === 'to_apply' && (force || !j.cover_letter),
@@ -126,7 +129,10 @@ export async function generateAllCoverLetters(minScore: number, force = false): 
 
   console.log(`Found ${eligible.length} jobs scoring ${minScore}+ without cover letters.\n`);
 
-  if (eligible.length === 0) return;
+  if (eligible.length === 0) {
+    await disconnectDatabase();
+    return;
+  }
 
   for (const job of eligible) {
     console.log(`Generating cover letter for: ${job.title} @ ${job.company}`);
@@ -134,24 +140,18 @@ export async function generateAllCoverLetters(minScore: number, force = false): 
     try {
       const coverLetter = await generateCoverLetter(job);
       job.cover_letter = coverLetter;
+
+      // Save cover letter to DB and update the job
+      await saveCoverLetter(job.id, coverLetter);
+      await saveJob(job);
+
       console.log(`  Done (${coverLetter.length} chars)\n`);
     } catch (err) {
       console.error(`  Failed: ${(err as Error).message}\n`);
     }
   }
 
-  fs.writeFileSync(DATA_FILE, JSON.stringify(jobs, null, 2));
-  console.log(`Saved ${eligible.length} cover letters to data/jobs.json`);
+  console.log(`Saved ${eligible.length} cover letters to database.`);
 
-  // save as individual text files for easy reading
-  const outputDir = path.join(__dirname, '../../data/cover-letters');
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  for (const job of eligible) {
-    if (!job.cover_letter) continue;
-    const filename = `${job.company.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${job.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.txt`;
-    const filepath = path.join(outputDir, filename);
-    fs.writeFileSync(filepath, job.cover_letter);
-    console.log(`  Saved: data/cover-letters/${filename}`);
-  }
+  await disconnectDatabase();
 }

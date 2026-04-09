@@ -1,16 +1,12 @@
 // Standalone: scrape LinkedIn job alerts → score → save
 // Run: npm run alerts -w packages/scraper
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJobs as persistJobs } from './db';
 import { scrapeLinkedInAlerts } from './scraper/linkedin-alerts';
 import { checkDealBreakers } from './deal-breakers';
 import { scoreFitWithLLM } from './scorer/llm-scorer';
 import type { JobListing, ScoredJob } from './types';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, '../data/jobs.json');
 const LLM_CONCURRENCY = 2;
 
 function quickReject(job: JobListing): string | null {
@@ -63,30 +59,19 @@ async function scoreBatch(batch: JobListing[]): Promise<ScoredJob[]> {
   return Promise.all(promises);
 }
 
-function loadExistingJobs(): ScoredJob[] {
-  if (!fs.existsSync(DATA_FILE)) return [];
-  const content = fs.readFileSync(DATA_FILE, 'utf-8').trim();
-  if (!content) return [];
-  return JSON.parse(content);
-}
-
-function saveJobs(jobs: ScoredJob[]) {
-  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(jobs, null, 2));
-}
-
 async function main() {
   console.log('LinkedIn Job Alerts — Scrape + Score');
   console.log('=====================================\n');
 
-  const existing = loadExistingJobs();
+  await connectToDatabase();
+
+  const existing = await loadExistingJobs();
   const existingIds = new Set(existing.map((j) => j.id));
   console.log(`Existing jobs in tracker: ${existing.length}\n`);
 
-  // ── scrape alerts ─────────────────────────────────────────────────
   const alertJobs = await scrapeLinkedInAlerts(50);
 
-  // ── deduplicate ───────────────────────────────────────────────────
+  // Deduplicate
   const existingKeys = new Set(existing.map((j) => `${j.company}|||${j.title}`.toLowerCase()));
   const existingUrls = new Set(existing.map((j) => j.url).filter(Boolean));
   const seenKeys = new Set<string>();
@@ -101,40 +86,41 @@ async function main() {
 
   if (newJobs.length === 0) {
     console.log('No new jobs from alerts.');
+    await disconnectDatabase();
     return;
   }
 
-  // ── fast filter ───────────────────────────────────────────────────
-  const results: ScoredJob[] = [...existing];
+  // Fast filter
+  const newScored: ScoredJob[] = [];
   const needsLLM: JobListing[] = [];
 
   for (const job of newJobs) {
     const dealBreaker = checkDealBreakers(job);
     if (dealBreaker.rejected) {
-      results.push({
+      newScored.push({
         ...job, fit_score: 0, apply: false, matched_skills: [], missing_skills: [],
         reason: dealBreaker.reason!, deal_breaker: dealBreaker.reason, status: 'rejected',
       });
       continue;
     }
-
     const reject = quickReject(job);
     if (reject) {
-      results.push({
+      newScored.push({
         ...job, fit_score: 0, apply: false, matched_skills: [], missing_skills: [],
         reason: reject, status: 'rejected',
       });
       continue;
     }
-
     needsLLM.push(job);
   }
+
+  if (newScored.length > 0) await persistJobs(newScored);
 
   const filtered = newJobs.length - needsLLM.length;
   console.log(`Fast-filtered: ${filtered}`);
   console.log(`Need LLM:      ${needsLLM.length}\n`);
 
-  // ── LLM scoring ──────────────────────────────────────────────────
+  // LLM scoring
   if (needsLLM.length > 0) {
     const totalBatches = Math.ceil(needsLLM.length / LLM_CONCURRENCY);
     for (let i = 0; i < needsLLM.length; i += LLM_CONCURRENCY) {
@@ -145,18 +131,16 @@ async function main() {
       const scored = await scoreBatch(batch);
 
       for (const s of scored) {
-        console.log(`  ${s.fit_score}/10 ${s.apply ? '✓' : '✗'} ${s.title} @ ${s.company}`);
-        results.push(s);
+        console.log(`  ${s.fit_score}/10 ${s.fit_score >= 5 ? '✓' : '✗'} ${s.title} @ ${s.company}`);
+        newScored.push(s);
       }
-
-      saveJobs(results);
+      await persistJobs(scored);
     }
-  } else {
-    saveJobs(results);
   }
 
-  // ── summary ───────────────────────────────────────────────────────
-  const toApply = results.filter((j) => j.status === 'to_apply');
+  // Summary
+  const allJobs = await loadExistingJobs();
+  const toApply = allJobs.filter((j) => j.status === 'to_apply');
   console.log('\n' + '━'.repeat(45));
   console.log('ALERTS SUMMARY');
   console.log('━'.repeat(45));
@@ -165,15 +149,15 @@ async function main() {
   console.log(`LLM-scored:       ${needsLLM.length}`);
   console.log(`Total to apply:   ${toApply.length}`);
 
-  const newToApply = results
-    .filter((j) => j.status === 'to_apply' && !existingIds.has(j.id));
-
+  const newToApply = newScored.filter((j) => j.status === 'to_apply');
   if (newToApply.length > 0) {
     console.log('\nNew matches from alerts:');
     newToApply
       .sort((a, b) => b.fit_score - a.fit_score)
       .forEach((j) => console.log(`  ${j.fit_score}/10 ${j.title} @ ${j.company}`));
   }
+
+  await disconnectDatabase();
 }
 
 main().catch(console.error);

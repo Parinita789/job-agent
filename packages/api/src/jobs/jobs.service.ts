@@ -1,59 +1,73 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { JobModel, CoverLetterModel } from '@job-agent/shared';
 import { spawn } from 'child_process';
-import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
 export class JobsService {
-  private getJobsFilePath(): string {
-    // __dirname is packages/api/src/jobs or packages/api/dist/jobs
-    // jobs.json is at packages/scraper/data/jobs.json
-    return path.resolve(__dirname, '../../../scraper/data/jobs.json');
+  async getAllJobs(): Promise<any[]> {
+    const jobs = await JobModel.find().sort({ fit_score: -1 }).lean();
+    return jobs.map((j) => ({ ...j, id: j.externalId }));
   }
 
-  private readAllRaw(): any[] {
-    const filePath = this.getJobsFilePath();
-    if (!fs.existsSync(filePath)) return [];
-    const content = fs.readFileSync(filePath, 'utf-8').trim();
-    if (!content) return [];
-    return JSON.parse(content);
-  }
-
-  getAllJobs(): any[] {
-    const jobs = this.readAllRaw();
-
-    // deduplicate by company+title, keeping the first occurrence (highest score wins after sort)
-    const seen = new Set<string>();
-    return jobs.filter((j) => {
-      const key = `${j.company}|||${j.title}`.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }
-
-  getJobById(id: string): any {
-    const jobs = this.getAllJobs();
-    const job = jobs.find((j) => j.id === id);
-    if (!job) throw new NotFoundException(`Job ${id} not found`);
-    return job;
-  }
-
-  updateJobStatus(id: string, status: string, reason?: string): any {
-    const filePath = this.getJobsFilePath();
-    const jobs = this.readAllRaw();
-    const job = jobs.find((j) => j.id === id);
+  async getJobById(id: string): Promise<any> {
+    const job = await JobModel.findOne({ externalId: id }).lean();
     if (!job) throw new NotFoundException(`Job ${id} not found`);
 
-    job.status = status;
-    if (reason) job.reason = reason;
-    if (status === 'applied') {
-      job.applied_at = new Date().toISOString();
-      job.applied_via = 'manual';
+    // Attach latest cover letter if exists
+    const coverLetter = await CoverLetterModel.findOne({ externalJobId: id }).sort({ generatedAt: -1 }).lean();
+    if (coverLetter) {
+      (job as any).cover_letter = coverLetter.content;
     }
 
-    fs.writeFileSync(filePath, JSON.stringify(jobs, null, 2));
+    return { ...job, id: (job as any).externalId };
+  }
+
+  async updateJobStatus(id: string, status: string, reason?: string): Promise<any> {
+    const update: any = { status };
+    if (reason) update.reason = reason;
+    if (status === 'applied') {
+      update.applied_at = new Date();
+      update.applied_via = 'manual';
+    }
+
+    const job = await JobModel.findOneAndUpdate(
+      { externalId: id },
+      { $set: update },
+      { new: true },
+    ).lean();
+
+    if (!job) throw new NotFoundException(`Job ${id} not found`);
     return job;
+  }
+
+  async getJobsWithCoverLetters(): Promise<any[]> {
+    const coverLetters = await CoverLetterModel.find().sort({ generatedAt: -1 }).lean();
+
+    // Group by externalJobId, keep latest
+    const latestByJob = new Map<string, any>();
+    for (const cl of coverLetters) {
+      if (!latestByJob.has(cl.externalJobId)) {
+        latestByJob.set(cl.externalJobId, cl);
+      }
+    }
+
+    const jobIds = Array.from(latestByJob.keys());
+    const jobs = await JobModel.find({ externalId: { $in: jobIds } }).lean();
+
+    return jobs.map((j) => {
+      const cl = latestByJob.get(j.externalId);
+      return {
+        id: j.externalId,
+        title: j.title,
+        company: j.company,
+        matched_skills: j.matched_skills || [],
+        fit_score: j.fit_score,
+        source: j.source,
+        cover_letter: cl?.content || '',
+        generated_at: cl?.generatedAt,
+      };
+    });
   }
 
   async generateCoverLetter(id: string): Promise<{ cover_letter: string }> {
@@ -66,28 +80,21 @@ export class JobsService {
         env: { ...process.env, FORCE_COLOR: '0' },
       });
 
-      let stdout = '';
       let stderr = '';
-
-      child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+      child.stdout.on('data', () => {});
       child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
 
-      child.on('close', (code) => {
+      child.on('close', async (code) => {
         if (code === 0) {
-          // re-read the updated job from disk
-          const job = this.getJobById(id);
-          resolve({ cover_letter: job.cover_letter ?? '' });
+          const coverLetter = await CoverLetterModel.findOne({ externalJobId: id }).sort({ generatedAt: -1 }).lean();
+          resolve({ cover_letter: coverLetter?.content ?? '' });
         } else {
           reject(new Error(stderr || `Process exited with code ${code}`));
         }
       });
 
       child.on('error', reject);
-
-      setTimeout(() => {
-        child.kill();
-        reject(new Error('Cover letter generation timed out'));
-      }, 60000);
+      setTimeout(() => { child.kill(); reject(new Error('Cover letter generation timed out')); }, 60000);
     });
   }
 }

@@ -17,6 +17,16 @@ function formatSalary(min?: number, max?: number): string {
   return min ? fmt(min) : fmt(max!);
 }
 
+function formatRelativeDate(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return '1d ago';
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
 function scoreClass(score: number): string {
   if (score >= 7) return 'high';
   if (score >= 5) return 'mid';
@@ -53,6 +63,7 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
           <th>Salary</th>
           {activeTab !== 'rejected' && <th>Tech Stack</th>}
           <th>Platform</th>
+          {activeTab === 'queue' && <th>Posted</th>}
           {activeTab === 'applied' && <th>Applied</th>}
           {activeTab === 'rejected' && <th>Reason</th>}
           {activeTab === 'queue' && <th>Apply</th>}
@@ -92,6 +103,11 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
             <td>
               <span className={`platform ${job.source}`}>{job.source}</span>
             </td>
+            {activeTab === 'queue' && (
+              <td className="posted-date">
+                {job.posted_at ? formatRelativeDate(job.posted_at) : '--'}
+              </td>
+            )}
             {activeTab === 'applied' && (
               <td>
                 <div className="applied-info">

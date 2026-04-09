@@ -8,7 +8,7 @@ An AI-powered job hunting automation platform that scrapes job listings from mul
 
 ```
 packages/
-├── shared/    — Shared TypeScript types and schemas
+├── shared/    — Shared types, Mongoose schemas, DB connection, LLM clients
 ├── scraper/   — Job scraping, scoring, and application automation
 ├── api/       — NestJS REST API
 └── ui/        — React + Vite dashboard
@@ -29,11 +29,14 @@ The system operates in phases, selectable individually or together from the dash
 
 - **Non-blocking pipeline** — pipeline runs in a floating bottom bar; browse jobs, apply, and manage your profile while it runs. Stop anytime.
 - **Platform filter** — filter the job table by LinkedIn, Greenhouse, Lever, or Indeed.
+- **Score filter** — filter jobs by minimum score (5+, 6+, 7+, 8+).
 - **Mark Applied / Dismiss** — mark jobs as applied (tracks auto vs manual) or dismiss expired postings. Dismissed jobs are never re-scraped.
+- **Cover Letters tab** — dedicated full-page view with search, split-panel layout, and copy-to-clipboard. Shows company, title, score, and tech stack for each letter.
 - **Per-job cover letter** — generate or regenerate a cover letter from the job detail modal.
-- **Candidate Profile editor** — edit your skills, preferences, deal-breakers, and compensation from the UI (hamburger menu).
-- **Form Answers manager** — view and edit rule-based answers used during Easy Apply form filling. See logs of all Q&A from previous auto-apply runs (hamburger menu).
+- **Candidate Profile editor** — edit your skills, preferences, deal-breakers, and compensation from the UI (hamburger menu). Upload a resume (PDF) to auto-generate a profile using LLM.
+- **Form Answers manager** — view and edit rule-based answers used during Easy Apply form filling. Browse logs of all Q&A from previous auto-apply runs (hamburger menu).
 - **New badge** — jobs scraped within the last 24 hours are marked "New" and sorted to the top.
+- **Posted date** — shows when the job was posted (relative format: "2d ago", "1w ago").
 
 ## Tech Stack
 
@@ -41,18 +44,22 @@ The system operates in phases, selectable individually or together from the dash
 - **Monorepo:** npm workspaces
 - **Scraping:** Playwright
 - **LLM (scoring + cover letters):** Anthropic Claude API (claude-sonnet-4-6)
-- **LLM (form filling):** Ollama (llama3, local inference)
+- **LLM (form filling + resume parsing):** Ollama (llama3, local inference)
 - **Backend:** NestJS
 - **Frontend:** React 18, Vite
-- **Storage:** File-based JSON
-- **Scheduling:** macOS launchd (12am + 12pm daily)
+- **Database:** MongoDB (Mongoose ODM)
+- **Scheduling:** macOS launchd
 
 ## Design Decisions
+
+### Shared LLM clients
+
+Both Ollama and Anthropic clients are initialized once in `@job-agent/shared` and reused across all packages. Lazy initialization ensures environment variables are loaded before client creation.
 
 ### Two-tier LLM strategy
 
 - **Claude API** for high-stakes decisions — job fit scoring and cover letter generation. These require strong reasoning and structured JSON output.
-- **Ollama (llama3, local)** for repetitive form filling — answering Easy Apply questions. Rule-based matching is tried first; Ollama is the fallback. Running locally eliminates per-call API costs.
+- **Ollama (llama3, local)** for repetitive form filling and resume parsing. Rule-based matching is tried first; Ollama is the fallback. Running locally eliminates per-call API costs.
 
 ### Two-layer filtering
 
@@ -63,13 +70,13 @@ The system operates in phases, selectable individually or together from the dash
 
 Jobs are deduplicated by ID, company+title, and URL — across all sources and all previous runs. Applied, rejected, and dismissed jobs are never re-scraped.
 
-### File-based storage over database
+### MongoDB storage
 
-Jobs are stored in `packages/scraper/data/jobs.json`. Single user, small dataset, no infrastructure overhead. MongoDB schemas exist in `packages/shared` if scaling is ever needed.
+Jobs, cover letters, user profile, form answers, and answer rules are stored in MongoDB collections. The shared package provides Mongoose schemas and a connection module used by both the API and scraper scripts.
 
 ### Concurrency
 
-LLM scoring runs in batches of 2 (`LLM_CONCURRENCY = 2`) with `Promise.all()`. Results are persisted to disk after each batch. On 429 errors, exponential backoff (30s, 60s, 90s). Scraping is sequential per source to avoid bot detection.
+LLM scoring runs in batches of 2 (`LLM_CONCURRENCY = 2`) with `Promise.all()`. Results are persisted to the database after each batch. On 429 errors, exponential backoff (30s, 60s, 90s). Scraping is sequential per source to avoid bot detection.
 
 ### Anti-detection
 
@@ -85,7 +92,8 @@ LLM scoring runs in batches of 2 (`LLM_CONCURRENCY = 2`) with `Promise.all()`. R
 
 - Node.js
 - npm
-- Ollama running locally (for Easy Apply form filling)
+- MongoDB (local or Docker)
+- Ollama running locally or on a remote machine (for form filling and resume parsing)
 
 ### Install
 
@@ -95,11 +103,13 @@ npm install
 
 ### Candidate Profile
 
+Upload a resume (PDF) through the UI to auto-generate a profile, or create one manually:
+
 ```bash
 cp packages/scraper/profile/candidate.example.json packages/scraper/profile/candidate.json
 ```
 
-Edit `candidate.json` with your experience, skills, preferences, deal-breakers, and compensation. The agent uses this to score jobs, filter roles, generate cover letters, and fill application forms.
+Edit `candidate.json` with your experience, skills, preferences, deal-breakers, and compensation.
 
 ### Environment
 
@@ -108,7 +118,14 @@ Create a `.env` file at the root:
 ```
 ANTHROPIC_API_KEY=your-key
 OLLAMA_BASE_URL=http://localhost:11434/v1
+MONGO_URI=mongodb://localhost:27017/job-tracker
 API_PORT=3001
+```
+
+### Migrate existing data (if upgrading from file-based storage)
+
+```bash
+npm run migrate
 ```
 
 ### Run
@@ -127,19 +144,28 @@ npm run api                   # Backend on port 3001
 npm run ui                    # Frontend on port 5173
 ```
 
+### Email Alerts
+
+1. Open a LinkedIn job alert email in Gmail
+2. Click three dots (top-right) → **Show original** → **Download Original**
+3. Drop the `.eml` file into `packages/scraper/data/email-alerts/`
+4. Run the "Email Alerts" phase from the pipeline UI
+
+Processed files are moved to `data/email-alerts/processed/`.
+
 ### Scheduling
 
-The full pipeline runs automatically at 12am and 12pm daily via macOS launchd.
+The full pipeline can run automatically via macOS launchd.
 
 ```bash
-# Check status
-launchctl list | grep jobagent
+# Enable (12am + 12pm daily)
+launchctl load ~/Library/LaunchAgents/com.jobagent.pipeline.plist
 
-# Stop
+# Disable
 launchctl unload ~/Library/LaunchAgents/com.jobagent.pipeline.plist
 
-# Restart
-launchctl load ~/Library/LaunchAgents/com.jobagent.pipeline.plist
+# Check status
+launchctl list | grep jobagent
 ```
 
 ### Lint & Format

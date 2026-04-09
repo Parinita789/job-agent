@@ -1,14 +1,9 @@
 // Generates a cover letter for a single job by ID
 // Usage: npx tsx src/generate-one-cover-letter.ts <jobId>
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJob, saveCoverLetter } from './db';
 import { generateCoverLetter } from './cover-letter/cover-letter';
 import type { ScoredJob } from './types';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, '../data/jobs.json');
 
 async function main() {
   const jobId = process.argv[2];
@@ -17,11 +12,14 @@ async function main() {
     process.exit(1);
   }
 
-  const jobs: ScoredJob[] = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+  await connectToDatabase();
+
+  const jobs: ScoredJob[] = await loadExistingJobs();
   const job = jobs.find((j) => j.id === jobId);
 
   if (!job) {
     console.error(`Job not found: ${jobId}`);
+    await disconnectDatabase();
     process.exit(1);
   }
 
@@ -30,8 +28,12 @@ async function main() {
   const coverLetter = await generateCoverLetter(job);
   job.cover_letter = coverLetter;
 
-  fs.writeFileSync(DATA_FILE, JSON.stringify(jobs, null, 2));
+  await saveCoverLetter(job.id, coverLetter);
+  await saveJob(job);
+
   console.log(`Done (${coverLetter.length} chars)`);
+
+  await disconnectDatabase();
 }
 
 main().catch((err) => {

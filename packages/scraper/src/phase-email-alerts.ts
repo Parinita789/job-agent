@@ -1,26 +1,10 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { scrapeEmailAlerts } from './scraper/email-alerts';
 import { checkDealBreakers } from './deal-breakers';
 import { scoreFitWithLLM } from './scorer/llm-scorer';
+import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJobs } from './db';
 import type { JobListing, ScoredJob } from './types';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, '../data/jobs.json');
 const LLM_CONCURRENCY = 2;
-
-function loadExistingJobs(): ScoredJob[] {
-  if (!fs.existsSync(DATA_FILE)) return [];
-  const content = fs.readFileSync(DATA_FILE, 'utf-8').trim();
-  if (!content) return [];
-  return JSON.parse(content);
-}
-
-function saveJobs(jobs: ScoredJob[]) {
-  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(jobs, null, 2));
-}
 
 function quickReject(job: JobListing): string | null {
   const t = job.title.toLowerCase();
@@ -70,11 +54,13 @@ async function scoreBatch(batch: JobListing[]): Promise<ScoredJob[]> {
 }
 
 async function main() {
+  await connectToDatabase();
+
   console.log('Phase — Email Alert Scraper');
   console.log('Parse .eml files → Scrape → Score');
   console.log('=====================================\n');
 
-  const existing = loadExistingJobs();
+  const existing = await loadExistingJobs();
   const existingIds = new Set(existing.map((j) => j.id));
   const existingKeys = new Set(existing.map((j) => `${j.company}|||${j.title}`.toLowerCase()));
   const existingUrls = new Set(existing.map((j) => j.url).filter(Boolean));
@@ -142,10 +128,10 @@ async function main() {
         console.log(`  ${s.fit_score}/10 ${s.fit_score >= 5 ? '✓' : '✗'} ${s.title} @ ${s.company}`);
         results.push(s);
       }
-      saveJobs(results);
+      await saveJobs(results);
     }
   } else {
-    saveJobs(results);
+    await saveJobs(results);
   }
 
   // Summary
@@ -157,6 +143,8 @@ async function main() {
   console.log(`Fast-filtered:   ${filtered}`);
   console.log(`LLM-scored:      ${needsLLM.length}`);
   console.log(`Total to apply:  ${toApply.length}`);
+
+  await disconnectDatabase();
 }
 
 main().catch(console.error);

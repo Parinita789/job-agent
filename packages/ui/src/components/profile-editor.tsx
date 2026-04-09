@@ -66,6 +66,7 @@ export function ProfileEditor({ isOpen, onClose }: ProfileEditorProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -91,6 +92,37 @@ export function ProfileEditor({ isOpen, onClose }: ProfileEditorProps) {
       setError(err.response?.data?.message || 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('resume', file);
+
+      const { data } = await axios.post('/api/profile/upload-resume', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000,
+      });
+
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setProfile(data);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 3000);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.response?.data?.message || 'Failed to parse resume. Check API logs.');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
     }
   };
 
@@ -120,8 +152,13 @@ export function ProfileEditor({ isOpen, onClose }: ProfileEditorProps) {
           <h2>Candidate Profile</h2>
           <div className="profile-header-actions">
             {saved && <span className="profile-saved">Saved</span>}
+            {uploading && <span className="command-running-badge">Parsing resume...</span>}
             {error && <span className="profile-error-badge">{error}</span>}
-            <button className="generate-btn" onClick={handleSave} disabled={saving || loading}>
+            <label className="upload-btn">
+              {uploading ? 'Uploading...' : 'Upload Resume'}
+              <input type="file" accept=".pdf" onChange={handleResumeUpload} disabled={uploading} hidden />
+            </label>
+            <button className="generate-btn" onClick={handleSave} disabled={saving || loading || uploading}>
               {saving ? 'Saving...' : 'Save'}
             </button>
             <button className="modal-close" onClick={onClose}>&times;</button>
@@ -131,7 +168,17 @@ export function ProfileEditor({ isOpen, onClose }: ProfileEditorProps) {
         {loading ? (
           <div className="profile-body"><div className="empty-state"><p>Loading...</p></div></div>
         ) : !profile ? (
-          <div className="profile-body"><div className="empty-state"><p>{error || 'No profile found'}</p></div></div>
+          <div className="profile-body">
+            <div className="resume-upload-prompt">
+              <h3>Get started</h3>
+              <p>Upload your resume (PDF) to automatically create your candidate profile.</p>
+              <label className="resume-upload-btn">
+                {uploading ? 'Parsing resume...' : 'Upload Resume (PDF)'}
+                <input type="file" accept=".pdf" onChange={handleResumeUpload} disabled={uploading} hidden />
+              </label>
+              {error && <p className="generate-error">{error}</p>}
+            </div>
+          </div>
         ) : (
           <div className="profile-body">
             {/* Personal */}

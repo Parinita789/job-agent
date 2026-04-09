@@ -1,6 +1,6 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { connectToDatabase, disconnectDatabase, loadExistingJobs as dbLoadJobs, saveJobs as dbSaveJobs } from './db';
 import { scrapeLinkedIn } from './scraper/linkedin';
 import { scrapeLinkedInAlerts } from './scraper/linkedin-alerts';
 import { scrapeGreenhouse } from './scraper/greenhouse';
@@ -12,7 +12,6 @@ import { TARGET_COMPANIES } from './scraper/company-list';
 import type { JobListing, ScoredJob } from './types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, '../data/jobs.json');
 
 const LLM_CONCURRENCY = 2;
 
@@ -49,16 +48,13 @@ const LINKEDIN_QUERIES = [
 
 const LINKEDIN_JOBS_PER_QUERY = 25;
 
-function loadExistingJobs(): ScoredJob[] {
-  if (!fs.existsSync(DATA_FILE)) return [];
-  const content = fs.readFileSync(DATA_FILE, 'utf-8').trim();
-  if (!content) return [];
-  return JSON.parse(content);
+// DB-backed load/save
+async function loadJobs(): Promise<ScoredJob[]> {
+  return dbLoadJobs();
 }
 
-function saveJobs(jobs: ScoredJob[]) {
-  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(jobs, null, 2));
+async function persistJobs(jobs: ScoredJob[]): Promise<void> {
+  await dbSaveJobs(jobs);
 }
 
 // ── Fast keyword pre-filter (no LLM needed) ────────────────────────
@@ -229,7 +225,9 @@ async function main() {
   console.log(`Sources: ${sources.join(', ')}`);
   console.log('=====================================\n');
 
-  const existingJobs = loadExistingJobs();
+  await connectToDatabase();
+
+  const existingJobs = await loadJobs();
   const existingIds = new Set(existingJobs.map((j) => j.id));
   console.log(`Existing jobs in tracker: ${existingJobs.length}\n`);
 
@@ -280,43 +278,35 @@ async function main() {
   // ── Layer 1: Fast filters (deal-breakers + keyword pre-filter) ────
   console.log(`\nLayer 1 — Fast filtering ${uniqueNewJobs.length} jobs...\n`);
 
-  const results: ScoredJob[] = [...existingJobs];
+  const newScoredJobs: ScoredJob[] = [];
   const needsLLM: JobListing[] = [];
 
   for (const job of uniqueNewJobs) {
-    // deal-breaker check
     const dealBreaker = checkDealBreakers(job);
     if (dealBreaker.rejected) {
-      results.push({
-        ...job,
-        fit_score: 0,
-        apply: false,
-        matched_skills: [],
-        missing_skills: [],
-        reason: dealBreaker.reason!,
-        deal_breaker: dealBreaker.reason,
-        status: 'rejected',
-      });
+      const rejected: ScoredJob = {
+        ...job, fit_score: 0, apply: false, matched_skills: [], missing_skills: [],
+        reason: dealBreaker.reason!, deal_breaker: dealBreaker.reason, status: 'rejected',
+      };
+      newScoredJobs.push(rejected);
       continue;
     }
 
-    // quick keyword reject
     const quickRejectReason = quickReject(job);
     if (quickRejectReason) {
-      results.push({
-        ...job,
-        fit_score: 0,
-        apply: false,
-        matched_skills: [],
-        missing_skills: [],
-        reason: quickRejectReason,
-        status: 'rejected',
-      });
+      const rejected: ScoredJob = {
+        ...job, fit_score: 0, apply: false, matched_skills: [], missing_skills: [],
+        reason: quickRejectReason, status: 'rejected',
+      };
+      newScoredJobs.push(rejected);
       continue;
     }
 
     needsLLM.push(job);
   }
+
+  // Save fast-filtered jobs immediately
+  if (newScoredJobs.length > 0) await persistJobs(newScoredJobs);
 
   const filtered = uniqueNewJobs.length - needsLLM.length;
   console.log(`  Filtered out: ${filtered} (deal-breakers + wrong stack)`);
@@ -327,6 +317,7 @@ async function main() {
     const totalBatches = Math.ceil(needsLLM.length / LLM_CONCURRENCY);
     console.log(`\nLayer 2 — LLM scoring ${needsLLM.length} jobs (${totalBatches} batches of ${LLM_CONCURRENCY})...\n`);
 
+    let scored_count = 0;
     for (let i = 0; i < needsLLM.length; i += LLM_CONCURRENCY) {
       const batch = needsLLM.slice(i, i + LLM_CONCURRENCY);
       const batchNum = Math.floor(i / LLM_CONCURRENCY) + 1;
@@ -338,20 +329,20 @@ async function main() {
 
       for (const s of scored) {
         console.log(`  ${s.fit_score}/10 ${s.fit_score >= 5 ? '✓' : '✗'} ${s.title} @ ${s.company}`);
-        results.push(s);
+        newScoredJobs.push(s);
       }
 
-      // save after each batch so progress isn't lost
-      saveJobs(results);
-      console.log(`  Saved. Progress: ${results.length - existingJobs.length}/${uniqueNewJobs.length}\n`);
+      // Save batch to DB
+      await persistJobs(scored);
+      scored_count += scored.length;
+      console.log(`  Saved. Progress: ${scored_count}/${needsLLM.length}\n`);
     }
-  } else {
-    saveJobs(results);
   }
 
   // ── final summary ──────────────────────────────────────────────────
-  const toApply = results.filter((j) => j.status === 'to_apply');
-  const rejected = results.filter((j) => j.status === 'rejected');
+  const allJobs = await loadJobs();
+  const toApply = allJobs.filter((j) => j.status === 'to_apply');
+  const rejected = allJobs.filter((j) => j.status === 'rejected');
 
   const bySource = toApply.reduce(
     (acc, j) => {
@@ -364,7 +355,7 @@ async function main() {
   console.log('━'.repeat(45));
   console.log('FINAL SUMMARY');
   console.log('━'.repeat(45));
-  console.log(`Total in tracker: ${results.length}`);
+  console.log(`Total in tracker: ${allJobs.length}`);
   console.log(`New this run:     ${uniqueNewJobs.length}`);
   console.log(`  Fast-filtered:  ${filtered}`);
   console.log(`  LLM-scored:     ${needsLLM.length}`);
@@ -381,7 +372,9 @@ async function main() {
       .forEach((j) => console.log(`  ${j.fit_score}/10 [${j.source}] ${j.title} @ ${j.company}`));
   }
 
-  console.log(`\nSaved to: data/jobs.json`);
+  console.log(`\nSaved to MongoDB`);
+
+  await disconnectDatabase();
 }
 
 main().catch(console.error);

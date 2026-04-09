@@ -1,15 +1,10 @@
-import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
+import { getOllamaClient } from '@job-agent/shared';
 import { PATHS } from '../config';
 
 dotenv.config({ path: path.join(__dirname, '../../../../.env') });
-
-const client = new OpenAI({
-  baseURL: process.env.OLLAMA_BASE_URL ?? 'http://10.0.0.197:11434/v1',
-  apiKey: 'ollama',
-});
 
 const profile = JSON.parse(fs.readFileSync(PATHS.profile, 'utf-8'));
 
@@ -73,7 +68,7 @@ Candidate:
 Reply with ONLY the exact text of the best matching option. Nothing else.
     `;
 
-    const res = await client.chat.completions.create({
+    const res = await getOllamaClient().chat.completions.create({
       model: 'llama3:latest',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.1,
@@ -97,7 +92,7 @@ Question: "${question}"
 Answer directly, no preamble.
   `;
 
-  const res = await client.chat.completions.create({
+  const res = await getOllamaClient().chat.completions.create({
     model: 'llama3:latest',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.2,

@@ -15,6 +15,7 @@
     "scraper:phase3:force": "npm run phase3:force -w packages/scraper",
     "scraper:alerts": "npm run alerts -w packages/scraper",
     "scraper:email-alerts": "npx tsx packages/scraper/src/phase-email-alerts.ts",
+    "migrate": "npx tsx packages/scraper/src/migrate-to-mongo.ts",
     "scraper:phase4": "npm run phase4 -w packages/scraper",
     "api": "npm run start:dev -w packages/api",
     "ui": "npm run dev -w packages/ui",

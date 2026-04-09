@@ -1,0 +1,155 @@
+import mongoose from 'mongoose';
+export declare const JobModel: mongoose.Model<{
+    externalId: string;
+    title: string;
+    company: string;
+    matched_skills: string[];
+    missing_skills: string[];
+    status: "to_apply" | "applied" | "rejected" | "no_response" | "interviewing";
+    notes: string;
+    location?: string | null | undefined;
+    remote?: boolean | null | undefined;
+    employment_type?: string | null | undefined;
+    salary_min?: number | null | undefined;
+    salary_max?: number | null | undefined;
+    description?: string | null | undefined;
+    url?: string | null | undefined;
+    scraped_at?: NativeDate | null | undefined;
+    fit_score?: number | null | undefined;
+    apply?: boolean | null | undefined;
+    reason?: string | null | undefined;
+    deal_breaker?: string | null | undefined;
+    source?: "linkedin" | "greenhouse" | "lever" | "indeed" | null | undefined;
+    applied_at?: NativeDate | null | undefined;
+    applied_via?: "auto" | "manual" | null | undefined;
+} & mongoose.DefaultTimestampProps, {}, {}, {}, mongoose.Document<unknown, {}, {
+    externalId: string;
+    title: string;
+    company: string;
+    matched_skills: string[];
+    missing_skills: string[];
+    status: "to_apply" | "applied" | "rejected" | "no_response" | "interviewing";
+    notes: string;
+    location?: string | null | undefined;
+    remote?: boolean | null | undefined;
+    employment_type?: string | null | undefined;
+    salary_min?: number | null | undefined;
+    salary_max?: number | null | undefined;
+    description?: string | null | undefined;
+    url?: string | null | undefined;
+    scraped_at?: NativeDate | null | undefined;
+    fit_score?: number | null | undefined;
+    apply?: boolean | null | undefined;
+    reason?: string | null | undefined;
+    deal_breaker?: string | null | undefined;
+    source?: "linkedin" | "greenhouse" | "lever" | "indeed" | null | undefined;
+    applied_at?: NativeDate | null | undefined;
+    applied_via?: "auto" | "manual" | null | undefined;
+} & mongoose.DefaultTimestampProps, {}, {
+    timestamps: true;
+}> & {
+    externalId: string;
+    title: string;
+    company: string;
+    matched_skills: string[];
+    missing_skills: string[];
+    status: "to_apply" | "applied" | "rejected" | "no_response" | "interviewing";
+    notes: string;
+    location?: string | null | undefined;
+    remote?: boolean | null | undefined;
+    employment_type?: string | null | undefined;
+    salary_min?: number | null | undefined;
+    salary_max?: number | null | undefined;
+    description?: string | null | undefined;
+    url?: string | null | undefined;
+    scraped_at?: NativeDate | null | undefined;
+    fit_score?: number | null | undefined;
+    apply?: boolean | null | undefined;
+    reason?: string | null | undefined;
+    deal_breaker?: string | null | undefined;
+    source?: "linkedin" | "greenhouse" | "lever" | "indeed" | null | undefined;
+    applied_at?: NativeDate | null | undefined;
+    applied_via?: "auto" | "manual" | null | undefined;
+} & mongoose.DefaultTimestampProps & {
+    _id: mongoose.Types.ObjectId;
+} & {
+    __v: number;
+}, mongoose.Schema<any, mongoose.Model<any, any, any, any, any, any>, {}, {}, {}, {}, {
+    timestamps: true;
+}, {
+    externalId: string;
+    title: string;
+    company: string;
+    matched_skills: string[];
+    missing_skills: string[];
+    status: "to_apply" | "applied" | "rejected" | "no_response" | "interviewing";
+    notes: string;
+    location?: string | null | undefined;
+    remote?: boolean | null | undefined;
+    employment_type?: string | null | undefined;
+    salary_min?: number | null | undefined;
+    salary_max?: number | null | undefined;
+    description?: string | null | undefined;
+    url?: string | null | undefined;
+    scraped_at?: NativeDate | null | undefined;
+    fit_score?: number | null | undefined;
+    apply?: boolean | null | undefined;
+    reason?: string | null | undefined;
+    deal_breaker?: string | null | undefined;
+    source?: "linkedin" | "greenhouse" | "lever" | "indeed" | null | undefined;
+    applied_at?: NativeDate | null | undefined;
+    applied_via?: "auto" | "manual" | null | undefined;
+} & mongoose.DefaultTimestampProps, mongoose.Document<unknown, {}, mongoose.FlatRecord<{
+    externalId: string;
+    title: string;
+    company: string;
+    matched_skills: string[];
+    missing_skills: string[];
+    status: "to_apply" | "applied" | "rejected" | "no_response" | "interviewing";
+    notes: string;
+    location?: string | null | undefined;
+    remote?: boolean | null | undefined;
+    employment_type?: string | null | undefined;
+    salary_min?: number | null | undefined;
+    salary_max?: number | null | undefined;
+    description?: string | null | undefined;
+    url?: string | null | undefined;
+    scraped_at?: NativeDate | null | undefined;
+    fit_score?: number | null | undefined;
+    apply?: boolean | null | undefined;
+    reason?: string | null | undefined;
+    deal_breaker?: string | null | undefined;
+    source?: "linkedin" | "greenhouse" | "lever" | "indeed" | null | undefined;
+    applied_at?: NativeDate | null | undefined;
+    applied_via?: "auto" | "manual" | null | undefined;
+} & mongoose.DefaultTimestampProps>, {}, mongoose.MergeType<mongoose.DefaultSchemaOptions, {
+    timestamps: true;
+}>> & mongoose.FlatRecord<{
+    externalId: string;
+    title: string;
+    company: string;
+    matched_skills: string[];
+    missing_skills: string[];
+    status: "to_apply" | "applied" | "rejected" | "no_response" | "interviewing";
+    notes: string;
+    location?: string | null | undefined;
+    remote?: boolean | null | undefined;
+    employment_type?: string | null | undefined;
+    salary_min?: number | null | undefined;
+    salary_max?: number | null | undefined;
+    description?: string | null | undefined;
+    url?: string | null | undefined;
+    scraped_at?: NativeDate | null | undefined;
+    fit_score?: number | null | undefined;
+    apply?: boolean | null | undefined;
+    reason?: string | null | undefined;
+    deal_breaker?: string | null | undefined;
+    source?: "linkedin" | "greenhouse" | "lever" | "indeed" | null | undefined;
+    applied_at?: NativeDate | null | undefined;
+    applied_via?: "auto" | "manual" | null | undefined;
+} & mongoose.DefaultTimestampProps> & {
+    _id: mongoose.Types.ObjectId;
+} & {
+    __v: number;
+}>>;
+//# sourceMappingURL=job.schema.d.ts.map

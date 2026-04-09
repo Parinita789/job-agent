@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { applyViaEasyApply } from './apply/easy-apply';
+import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJob } from './db';
 import type { ScoredJob } from './types';
 import { PATHS } from './config';
 
@@ -11,11 +12,13 @@ dotenv.config({ path: path.join(__dirname, '../../../.env') });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
+  await connectToDatabase();
+
   console.log('Phase 4 — LinkedIn Easy Apply');
   console.log('==============================\n');
 
   // load jobs scoring 7+, LinkedIn only (Greenhouse/Lever need manual apply)
-  const jobs: ScoredJob[] = JSON.parse(fs.readFileSync(PATHS.jobs, 'utf-8'));
+  const jobs: ScoredJob[] = await loadExistingJobs();
 
   const allEligible = jobs.filter(
     (j) => j.fit_score >= 7 && j.apply === true && j.status === 'to_apply',
@@ -89,13 +92,11 @@ async function main() {
       console.log(`  APPLIED`);
       results.applied.push(label);
 
-      // update status in jobs array
-      const jobInArray = jobs.find((j) => j.id === job.id);
-      if (jobInArray) {
-        jobInArray.status = 'applied';
-        (jobInArray as any).applied_at = new Date().toISOString();
-        (jobInArray as any).applied_via = 'auto';
-      }
+      // update status in DB
+      job.status = 'applied';
+      job.applied_at = new Date().toISOString();
+      job.applied_via = 'auto';
+      await saveJob(job);
     } else if (result.reason.includes('No Easy Apply')) {
       console.log(`  SKIPPED: ${result.reason}`);
       results.skipped.push({ job: label, reason: result.reason });
@@ -103,9 +104,6 @@ async function main() {
       console.log(`  FAILED: ${result.reason}`);
       results.failed.push({ job: label, reason: result.reason });
     }
-
-    // save updated jobs after each application
-    fs.writeFileSync(PATHS.jobs, JSON.stringify(jobs, null, 2));
 
     // human-like delay between applications (15-30 seconds)
     if (i < toApply.length - 1) {
@@ -139,6 +137,8 @@ async function main() {
     console.log('\nFailed (check debug screenshots in data/):');
     results.failed.forEach((f) => console.log(`  ! ${f.job} — ${f.reason}`));
   }
+
+  await disconnectDatabase();
 }
 
 main().catch(console.error);

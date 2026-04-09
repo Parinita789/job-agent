@@ -14,6 +14,7 @@ export interface ScoredJob {
   url: string;
   source: JobSource;
   scraped_at: string;
+  posted_at?: string;
   fit_score: number;
   apply: boolean;
   matched_skills: string[];

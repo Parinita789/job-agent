@@ -8,13 +8,15 @@ import { CommandPanel } from './command-panel';
 import { KeywordManager } from './keyword-manager';
 import { ProfileEditor } from './profile-editor';
 import { FormAnswers } from './form-answers';
+import { CoverLettersPage, type CoverLetterJob } from './cover-letters';
 
-type Tab = 'queue' | 'applied' | 'rejected';
+type Tab = 'queue' | 'applied' | 'rejected' | 'cover-letters';
 type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('queue');
   const [jobs, setJobs] = useState<ScoredJob[]>([]);
+  const [coverLetterJobs, setCoverLetterJobs] = useState<CoverLetterJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<ScoredJob | null>(null);
   const [commandPanelOpen, setCommandPanelOpen] = useState(false);
   const [keywordManagerOpen, setKeywordManagerOpen] = useState(false);
@@ -23,6 +25,7 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
+  const [scoreFilter, setScoreFilter] = useState<number>(0);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -35,7 +38,21 @@ export function App() {
     }
   }, []);
 
-  useEffect(() => { fetchJobs(); }, [fetchJobs]);
+  const fetchCoverLetters = useCallback(async () => {
+    try {
+      const { data } = await axios.get<CoverLetterJob[]>('/api/jobs/cover-letters');
+      setCoverLetterJobs(data);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => { fetchJobs(); fetchCoverLetters(); }, [fetchJobs, fetchCoverLetters]);
+
+  // Refresh cover letters when switching to that tab
+  useEffect(() => {
+    if (activeTab === 'cover-letters') fetchCoverLetters();
+  }, [activeTab, fetchCoverLetters]);
 
   const handleClosePanel = useCallback(() => {
     setCommandPanelOpen(false);
@@ -44,7 +61,8 @@ export function App() {
 
   const handleCommandComplete = useCallback(async () => {
     await fetchJobs();
-  }, [fetchJobs]);
+    await fetchCoverLetters();
+  }, [fetchJobs, fetchCoverLetters]);
 
   useEffect(() => {
     const interval = setInterval(fetchJobs, 30000);
@@ -72,7 +90,8 @@ export function App() {
     }
   }, []);
 
-  const filtered = platformFilter === 'all' ? jobs : jobs.filter((j) => j.source === platformFilter);
+  const byPlatform = platformFilter === 'all' ? jobs : jobs.filter((j) => j.source === platformFilter);
+  const filtered = scoreFilter > 0 ? byPlatform.filter((j) => j.fit_score >= scoreFilter) : byPlatform;
   const queue = filtered.filter((j) => j.status === 'to_apply');
   const applied = filtered.filter((j) => j.status === 'applied');
   const rejected = filtered.filter((j) => j.status === 'rejected');
@@ -119,22 +138,46 @@ export function App() {
       <TabBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        counts={{ queue: queue.length, applied: applied.length, rejected: rejected.length }}
+        counts={{ queue: queue.length, applied: applied.length, rejected: rejected.length, coverLetters: coverLetterJobs.length }}
         onOpenCommands={() => setCommandPanelOpen(true)}
         onOpenKeywords={() => setKeywordManagerOpen(true)}
       />
-      <div className="platform-filter">
-        {(['all', 'linkedin', 'greenhouse', 'lever', 'indeed'] as PlatformFilter[]).map((p) => (
-          <button
-            key={p}
-            className={`filter-btn ${platformFilter === p ? 'active' : ''}`}
-            onClick={() => setPlatformFilter(p)}
-          >
-            {p === 'all' ? 'All' : p.charAt(0).toUpperCase() + p.slice(1)}
-          </button>
-        ))}
-      </div>
-      <JobTable jobs={tabJobs} activeTab={activeTab} onSelectJob={setSelectedJob} onDismissJob={handleDismissJob} onMarkApplied={handleMarkApplied} />
+
+      {activeTab !== 'cover-letters' && (
+        <>
+          <div className="filter-row">
+            <div className="platform-filter">
+              {(['all', 'linkedin', 'greenhouse', 'lever', 'indeed'] as PlatformFilter[]).map((p) => (
+                <button
+                  key={p}
+                  className={`filter-btn ${platformFilter === p ? 'active' : ''}`}
+                  onClick={() => setPlatformFilter(p)}
+                >
+                  {p === 'all' ? 'All' : p.charAt(0).toUpperCase() + p.slice(1)}
+                </button>
+              ))}
+            </div>
+            <div className="score-filter">
+              <span className="score-filter-label">Score:</span>
+              {[0, 5, 6, 7, 8].map((s) => (
+                <button
+                  key={s}
+                  className={`filter-btn ${scoreFilter === s ? 'active' : ''}`}
+                  onClick={() => setScoreFilter(s)}
+                >
+                  {s === 0 ? 'All' : `${s}+`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <JobTable jobs={tabJobs} activeTab={activeTab} onSelectJob={setSelectedJob} onDismissJob={handleDismissJob} onMarkApplied={handleMarkApplied} />
+        </>
+      )}
+
+      {activeTab === 'cover-letters' && (
+        <CoverLettersPage jobs={coverLetterJobs} />
+      )}
+
       {selectedJob && (
         <JobDetail
           job={selectedJob}

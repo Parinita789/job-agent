@@ -15,6 +15,7 @@ export interface JobListing {
   url: string;
   source: JobSource;
   scraped_at: string;
+  posted_at?: string;
 }
 
 export interface ScoredJob extends JobListing {
