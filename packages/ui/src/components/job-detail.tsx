@@ -2,6 +2,12 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import type { ScoredJob } from '../types';
 
+function decodeHtml(html: string): string {
+  const txt = document.createElement('textarea');
+  txt.innerHTML = html;
+  return txt.value;
+}
+
 interface JobDetailProps {
   job: ScoredJob;
   onClose: () => void;
@@ -11,6 +17,7 @@ interface JobDetailProps {
 export function JobDetail({ job, onClose, onJobUpdate }: JobDetailProps) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const handleGenerateCoverLetter = async () => {
     setGenerating(true);
@@ -92,7 +99,16 @@ export function JobDetail({ job, onClose, onJobUpdate }: JobDetailProps) {
         <div className="modal-section">
           <h3>Cover Letter</h3>
           {job.cover_letter ? (
-            <pre>{job.cover_letter}</pre>
+            <div className="cover-letter-block">
+              <pre>{job.cover_letter}</pre>
+              <button
+                className="copy-icon-btn"
+                title={copied ? 'Copied!' : 'Copy to clipboard'}
+                onClick={() => { navigator.clipboard.writeText(job.cover_letter!); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+              >
+                {copied ? '✓' : '⎘'}
+              </button>
+            </div>
           ) : (
             <div className="cover-letter-empty">
               <p>No cover letter generated yet.</p>
@@ -120,7 +136,14 @@ export function JobDetail({ job, onClose, onJobUpdate }: JobDetailProps) {
 
         <div className="modal-section">
           <h3>Job Description</h3>
-          <pre>{job.description}</pre>
+          {job.description.includes('&lt;') || job.description.includes('<p') || job.description.includes('<div') ? (
+            <div
+              className="job-description-html"
+              dangerouslySetInnerHTML={{ __html: decodeHtml(job.description) }}
+            />
+          ) : (
+            <pre>{job.description}</pre>
+          )}
         </div>
 
         <div style={{ marginTop: '20px' }}>

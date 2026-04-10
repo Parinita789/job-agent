@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
-import { getOllamaClient } from '@job-agent/shared';
+import { llmChat } from '@job-agent/shared';
 import { PATHS } from '../config';
 
 dotenv.config({ path: path.join(__dirname, '../../../../.env') });
@@ -68,13 +68,7 @@ Candidate:
 Reply with ONLY the exact text of the best matching option. Nothing else.
     `;
 
-    const res = await getOllamaClient().chat.completions.create({
-      model: 'llama3:latest',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-    });
-
-    return res.choices[0].message.content!.trim();
+    return llmChat(prompt, { temperature: 0.1, maxTokens: 200 });
   }
 
   // open-ended textarea
@@ -92,11 +86,5 @@ Question: "${question}"
 Answer directly, no preamble.
   `;
 
-  const res = await getOllamaClient().chat.completions.create({
-    model: 'llama3:latest',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.2,
-  });
-
-  return res.choices[0].message.content!.trim();
+  return llmChat(prompt, { temperature: 0.2, maxTokens: 200 });
 }

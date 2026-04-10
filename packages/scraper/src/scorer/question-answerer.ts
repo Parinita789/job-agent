@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { getOllamaClient } from '@job-agent/shared';
+import { llmChat } from '@job-agent/shared';
 import { loadProfile, loadAnswerRules, logQuestionAnswer } from '../db';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -84,32 +84,12 @@ export function setCurrentJob(job: { id: string; title: string; company: string 
 
 async function logQA(entry: QAEntry) {
   if (!currentJob) return;
-  await logQuestionAnswer(
-    currentJob.id,
-    currentJob.title,
-    currentJob.company,
-    entry,
-  );
+  await logQuestionAnswer(currentJob.id, currentJob.title, currentJob.company, entry);
 }
 
-async function askOllama(prompt: string): Promise<string> {
-  const res = await getOllamaClient().chat.completions.create({
-    model: 'llama3:latest',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.1,
-  });
-  return res.choices[0].message.content!.trim();
+async function askLLM(prompt: string): Promise<string> {
+  return llmChat(prompt, { temperature: 0.1, maxTokens: 200 });
 }
-
-// ── Claude version (commented out) ──
-// async function askClaude(prompt: string): Promise<string> {
-//   const message = await anthropic.messages.create({
-//     model: 'claude-haiku-4-5-20251001',
-//     max_tokens: 200,
-//     messages: [{ role: 'user', content: prompt }],
-//   });
-//   return (message.content[0] as any).text.trim();
-// }
 
 export async function answerQuestion(
   question: string,
@@ -141,7 +121,7 @@ Candidate:
 Reply with ONLY the exact text of the best matching option. Nothing else.
     `;
 
-    const answer = await askOllama(prompt);
+    const answer = await askLLM(prompt);
     await logQA({ question, type, options, answer, source: 'llm' });
     return answer;
   }
@@ -161,7 +141,7 @@ Question: "${question}"
 Answer directly, no preamble.
   `;
 
-  const answer = await askOllama(prompt);
+  const answer = await askLLM(prompt);
   await logQA({ question, type, options, answer, source: 'llm' });
   return answer;
 }

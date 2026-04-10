@@ -37,12 +37,17 @@ export async function saveJobs(jobs: ScoredJob[]): Promise<void> {
 
 export async function saveCoverLetter(externalJobId: string, content: string): Promise<void> {
   const job = await JobModel.findOne({ externalId: externalJobId });
-  await CoverLetterModel.create({
-    jobId: job?._id,
-    externalJobId,
-    content,
-    generatedAt: new Date(),
-  });
+  await CoverLetterModel.findOneAndUpdate(
+    { externalJobId },
+    {
+      $set: {
+        jobId: job?._id,
+        content,
+        generatedAt: new Date(),
+      },
+    },
+    { upsert: true },
+  );
 }
 
 export async function loadProfile(): Promise<any> {

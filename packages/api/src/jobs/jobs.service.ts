@@ -7,7 +7,10 @@ import * as path from 'path';
 export class JobsService {
   async getAllJobs(): Promise<any[]> {
     const jobs = await JobModel.find().sort({ fit_score: -1 }).lean();
-    return jobs.map((j) => ({ ...j, id: j.externalId }));
+    return jobs.map((j: any) => {
+      const { _id, __v, ...rest } = j;
+      return { ...rest, id: j.externalId };
+    });
   }
 
   async getJobById(id: string): Promise<any> {
@@ -20,7 +23,8 @@ export class JobsService {
       (job as any).cover_letter = coverLetter.content;
     }
 
-    return { ...job, id: (job as any).externalId };
+    const { _id, __v, ...rest } = job as any;
+    return { ...rest, id: (job as any).externalId };
   }
 
   async updateJobStatus(id: string, status: string, reason?: string): Promise<any> {
@@ -38,7 +42,8 @@ export class JobsService {
     ).lean();
 
     if (!job) throw new NotFoundException(`Job ${id} not found`);
-    return job;
+    const { _id, __v, ...rest } = job as any;
+    return { ...rest, id: (job as any).externalId };
   }
 
   async getJobsWithCoverLetters(): Promise<any[]> {
@@ -55,19 +60,21 @@ export class JobsService {
     const jobIds = Array.from(latestByJob.keys());
     const jobs = await JobModel.find({ externalId: { $in: jobIds } }).lean();
 
-    return jobs.map((j) => {
-      const cl = latestByJob.get(j.externalId);
-      return {
-        id: j.externalId,
-        title: j.title,
-        company: j.company,
-        matched_skills: j.matched_skills || [],
-        fit_score: j.fit_score,
-        source: j.source,
-        cover_letter: cl?.content || '',
-        generated_at: cl?.generatedAt,
-      };
-    });
+    return jobs
+      .map((j) => {
+        const cl = latestByJob.get(j.externalId);
+        return {
+          id: j.externalId,
+          title: j.title,
+          company: j.company,
+          matched_skills: j.matched_skills || [],
+          fit_score: j.fit_score,
+          source: j.source,
+          cover_letter: cl?.content || '',
+          generated_at: cl?.generatedAt,
+        };
+      })
+      .sort((a, b) => new Date(b.generated_at).getTime() - new Date(a.generated_at).getTime());
   }
 
   async generateCoverLetter(id: string): Promise<{ cover_letter: string }> {

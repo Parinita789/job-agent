@@ -17,6 +17,7 @@ const PHASE_LIST = [
   { id: 'scrape', label: 'Scrape + Score', name: 'scrape + score', cmd: 'npx', args: ['tsx', 'src/phase2.ts'] },
   { id: 'alerts', label: 'LinkedIn Alerts', name: 'scrape alerts + score', cmd: 'npx', args: ['tsx', 'src/phase-alerts.ts'] },
   { id: 'email-alerts', label: 'Email Alerts', name: 'email alerts + score', cmd: 'npx', args: ['tsx', 'src/phase-email-alerts.ts'] },
+  { id: 'gmail-alerts', label: 'Gmail Alerts', name: 'gmail alerts + score', cmd: 'npx', args: ['tsx', 'src/phase-gmail-alerts.ts'] },
   { id: 'rescore', label: 'Rescore Jobs', name: 'rescore', cmd: 'npx', args: ['tsx', 'src/rescore.ts'] },
   { id: 'cover-letters', label: 'Cover Letters', name: 'cover letters', cmd: 'npx', args: ['tsx', 'src/phase3.ts'] },
   { id: 'apply', label: 'Auto Apply', name: 'auto apply', cmd: 'npx', args: ['tsx', 'src/phase4.ts'] },

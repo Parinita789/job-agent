@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as dotenv from 'dotenv';
-import { getAnthropicClient } from '@job-agent/shared';
+import { llmChat } from '@job-agent/shared';
 import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJob, saveCoverLetter, loadProfile } from '../db';
 import type { ScoredJob } from '../types';
 
@@ -108,13 +108,12 @@ Write the cover letter body with "Dear Hiring Manager," at the top and a brief p
 export async function generateCoverLetter(job: ScoredJob): Promise<string> {
   const prompt = await buildCoverLetterPrompt(job);
 
-  const message = await getAnthropicClient().messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 350,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  let text = await llmChat(prompt, { temperature: 0.2, maxTokens: 350 });
 
-  return (message.content[0] as any).text.trim();
+  // Strip LLM preamble lines like "Here is the cover letter:"
+  text = text.replace(/^(?:here(?:'s| is) (?:the |a |your )?cover letter[:\s]*\n*)/i, '').trim();
+
+  return text;
 }
 
 // ── Batch cover letter generator ──────────────────────────────────────────────

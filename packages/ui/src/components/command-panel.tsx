@@ -11,6 +11,7 @@ const PHASE_DESCRIPTIONS: Record<string, string> = {
   scrape: 'Select platforms below',
   alerts: 'From saved alert feeds',
   'email-alerts': 'From .eml files in data/email-alerts/',
+  'gmail-alerts': 'Auto-fetch from Gmail inbox',
   rescore: 'Re-evaluate all jobs',
   'cover-letters': 'For jobs scoring 5+',
   apply: 'LinkedIn Easy Apply',

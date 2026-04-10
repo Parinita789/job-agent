@@ -26,6 +26,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
   const [scoreFilter, setScoreFilter] = useState<number>(0);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -91,7 +92,13 @@ export function App() {
   }, []);
 
   const byPlatform = platformFilter === 'all' ? jobs : jobs.filter((j) => j.source === platformFilter);
-  const filtered = scoreFilter > 0 ? byPlatform.filter((j) => j.fit_score >= scoreFilter) : byPlatform;
+  const byScore = scoreFilter > 0 ? byPlatform.filter((j) => j.fit_score === scoreFilter) : byPlatform;
+  const filtered = searchQuery
+    ? byScore.filter((j) =>
+        j.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        j.title.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : byScore;
   const queue = filtered.filter((j) => j.status === 'to_apply');
   const applied = filtered.filter((j) => j.status === 'applied');
   const rejected = filtered.filter((j) => j.status === 'rejected');
@@ -146,6 +153,17 @@ export function App() {
       {activeTab !== 'cover-letters' && (
         <>
           <div className="filter-row">
+            <div className="search-filter">
+              <input
+                className="search-input"
+                placeholder="Search company or title..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button className="search-clear" onClick={() => setSearchQuery('')}>&times;</button>
+              )}
+            </div>
             <div className="platform-filter">
               {(['all', 'linkedin', 'greenhouse', 'lever', 'indeed'] as PlatformFilter[]).map((p) => (
                 <button
@@ -159,13 +177,13 @@ export function App() {
             </div>
             <div className="score-filter">
               <span className="score-filter-label">Score:</span>
-              {[0, 5, 6, 7, 8].map((s) => (
+              {[0, 5, 6, 7, 8, 9].map((s) => (
                 <button
                   key={s}
                   className={`filter-btn ${scoreFilter === s ? 'active' : ''}`}
                   onClick={() => setScoreFilter(s)}
                 >
-                  {s === 0 ? 'All' : `${s}+`}
+                  {s === 0 ? 'All' : s}
                 </button>
               ))}
             </div>

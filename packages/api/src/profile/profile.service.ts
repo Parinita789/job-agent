@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { UserModel, getOllamaClient, getAnthropicClient } from '@job-agent/shared';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+import { UserModel, llmChat } from '@job-agent/shared';
 const pdfParse = require('pdf-parse');
 
 @Injectable()
@@ -119,33 +118,21 @@ Rules:
 Resume:
 ${resumeText.slice(0, 8000)}`;
 
-    // ── Ollama (local LLM) ──
     console.log('[Resume] Sending to LLM for parsing...');
-    let res;
+    let responseText: string;
     try {
-      res = await getOllamaClient().chat.completions.create({
-      model: 'llama3:latest',
-      messages: [
-        { role: 'system', content: 'You are a JSON-only assistant. Always respond with valid JSON. No explanations, no markdown, no preamble.' },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-    });
+      responseText = await llmChat(prompt, {
+        system:
+          'You are a JSON-only assistant. Always respond with valid JSON. No explanations, no markdown, no preamble.',
+        temperature: 0.1,
+        maxTokens: 2000,
+        jsonMode: true,
+      });
     } catch (err) {
       console.error('[Resume] LLM call failed:', (err as Error).message);
-      throw new Error(`LLM connection failed: ${(err as Error).message}. Is Ollama running?`);
+      throw new Error(`LLM connection failed: ${(err as Error).message}`);
     }
-    const responseText = res.choices[0].message.content!.trim();
     console.log(`[Resume] LLM response: ${responseText.length} chars`);
-
-    // ── Claude API (commented out) ──
-    // const message = await anthropic.messages.create({
-    //   model: 'claude-sonnet-4-6',
-    //   max_tokens: 2000,
-    //   messages: [{ role: 'user', content: prompt }],
-    // });
-    // const responseText = (message.content[0] as any).text.trim();
 
     // Extract JSON from response — handle markdown blocks, preamble text, etc.
     let jsonStr = responseText;
@@ -167,7 +154,10 @@ ${resumeText.slice(0, 8000)}`;
     try {
       profile = JSON.parse(jsonStr);
     } catch {
-      console.error('Failed to parse LLM response as JSON. Raw response:', responseText.slice(0, 500));
+      console.error(
+        'Failed to parse LLM response as JSON. Raw response:',
+        responseText.slice(0, 500),
+      );
       throw new Error('LLM returned invalid JSON. Try uploading again.');
     }
 

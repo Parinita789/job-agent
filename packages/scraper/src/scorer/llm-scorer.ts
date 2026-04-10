@@ -1,4 +1,4 @@
-import { getAnthropicClient } from '@job-agent/shared';
+import { llmChatWithRetry } from '@job-agent/shared';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
@@ -41,10 +41,15 @@ You are evaluating job fit for a specific candidate. Be strict and accurate.
 ## Candidate
 - Current level: ${profile.experience.current_level}
 - Years experience: ${profile.experience.total_years}
-- Core stack: ${profile.skills.languages.join(', ')}
+- Languages: ${profile.skills.languages.join(', ')}
 - Frameworks: ${profile.skills.frameworks.join(', ')}
-- Architecture: ${profile.skills.architecture.join(', ')}
-- Cloud: ${profile.skills.cloud.join(', ')}
+- Databases: ${(profile.skills.databases || []).join(', ')}
+- Messaging: ${(profile.skills.messaging || []).join(', ')}
+- Cloud: ${(profile.skills.cloud || []).join(', ')}
+- DevOps: ${(profile.skills.devops || []).join(', ')}
+- Architecture: ${(profile.skills.architecture || []).join(', ')}
+- AI: ${(profile.skills.ai || []).join(', ')}
+- Tools: ${(profile.skills.tools || []).join(', ')}
 - Work history:
 ${workSummary}
 
@@ -113,6 +118,12 @@ Company: ${job.company}
 Location: ${job.location}
 Description: ${job.description.slice(0, 800)}
 
+IMPORTANT rules for matched_skills and missing_skills:
+- matched_skills: skills the job requires that the candidate HAS (listed above)
+- missing_skills: skills the job requires that the candidate does NOT have
+- NEVER list a skill as missing if it appears anywhere in the candidate's profile above
+- For example: NestJS, CloudFront, Docker, Redis, MongoDB, AWS etc. are in the candidate's profile — do NOT list them as missing
+
 Respond with ONLY a JSON object. Start with { and end with }. No other text.
 {
   "fit_score": <number 1-10>,
@@ -132,31 +143,13 @@ interface ScoreResult {
   reason: string;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function callWithRetry(prompt: string, retries = 3): Promise<string> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      const response = await getAnthropicClient().messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 300,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-      });
-
-      return response.content[0].type === 'text' ? response.content[0].text : '';
-    } catch (err: any) {
-      const is429 = err?.status === 429 || err?.error?.type === 'rate_limit_error';
-      if (is429 && attempt < retries - 1) {
-        const waitSec = 30 * (attempt + 1); // 30s, 60s, 90s
-        console.log(`    Rate limited — waiting ${waitSec}s before retry ${attempt + 2}/${retries}...`);
-        await sleep(waitSec * 1000);
-        continue;
-      }
-      throw err;
-    }
-  }
-  return '';
+async function callWithRetry(prompt: string): Promise<string> {
+  return llmChatWithRetry(prompt, {
+    system: 'You are a JSON-only assistant. Always respond with valid JSON. No explanations, no markdown.',
+    temperature: 0.1,
+    maxTokens: 300,
+    jsonMode: true,
+  });
 }
 
 export async function scoreFitWithLLM(job: JobListing): Promise<ScoreResult> {
