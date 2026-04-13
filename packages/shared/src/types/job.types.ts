@@ -1,4 +1,4 @@
-export type JobStatus = 'to_apply' | 'applied' | 'rejected' | 'no_response' | 'interviewing';
+export type JobStatus = 'to_apply' | 'applied' | 'rejected' | 'no_response' | 'interviewing' | 'accepted' | 'declined';
 
 export type JobSource = 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
 

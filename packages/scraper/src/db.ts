@@ -50,6 +50,37 @@ export async function saveCoverLetter(externalJobId: string, content: string): P
   );
 }
 
+export async function getBestCoverLetters(limit: number = 3): Promise<{ title: string; company: string; content: string }[]> {
+  // Get cover letters linked to highest-scoring jobs, from different companies
+  const coverLetters = await CoverLetterModel.find().sort({ generatedAt: -1 }).lean();
+  if (coverLetters.length === 0) return [];
+
+  const jobIds = coverLetters.map((cl: any) => cl.externalJobId);
+  const jobs = await JobModel.find({ externalId: { $in: jobIds } }).lean();
+  const jobMap = new Map(jobs.map((j: any) => [j.externalId, j]));
+
+  // Pair cover letters with jobs, sort by fit_score, pick top from different companies
+  const paired = coverLetters
+    .map((cl: any) => {
+      const job = jobMap.get(cl.externalJobId);
+      if (!job || !cl.content || cl.content.length < 50) return null;
+      return { title: job.title, company: job.company, content: cl.content, score: job.fit_score || 0 };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => b.score - a.score);
+
+  const seen = new Set<string>();
+  const results: { title: string; company: string; content: string }[] = [];
+  for (const item of paired) {
+    if (seen.has(item!.company)) continue;
+    seen.add(item!.company);
+    results.push({ title: item!.title, company: item!.company, content: item!.content });
+    if (results.length >= limit) break;
+  }
+
+  return results;
+}
+
 export async function loadProfile(): Promise<any> {
   return UserModel.findOne().lean();
 }
@@ -66,14 +97,38 @@ export async function logQuestionAnswer(
   jobId: string, title: string, company: string,
   entry: { question: string; type: string; options?: string[]; answer: string; source: 'rule' | 'llm' },
 ): Promise<void> {
-  await QuestionAnswerModel.findOneAndUpdate(
-    { externalJobId: jobId },
-    {
-      $setOnInsert: { title, company, appliedAt: new Date() },
-      $push: { answers: entry },
-    },
-    { upsert: true },
-  );
+  // Strip options if too many (country lists etc.) or contain phone codes
+  const cleanEntry = { ...entry };
+  if (cleanEntry.options) {
+    if (cleanEntry.options.length > 15 || cleanEntry.options.some((o) => o.includes('+93') || o.includes('Afghanistan'))) {
+      delete cleanEntry.options;
+    }
+  }
+
+  // Check if this question already exists for this job — update instead of duplicating
+  const existing = await QuestionAnswerModel.findOne({ externalJobId: jobId }).lean();
+  if (existing) {
+    const answers = (existing as any).answers || [];
+    const idx = answers.findIndex((a: any) => a.question === cleanEntry.question);
+    if (idx >= 0) {
+      // Update existing answer
+      answers[idx] = cleanEntry;
+    } else {
+      answers.push(cleanEntry);
+    }
+    await QuestionAnswerModel.updateOne(
+      { externalJobId: jobId },
+      { $set: { answers, appliedAt: new Date() } },
+    );
+  } else {
+    await QuestionAnswerModel.create({
+      externalJobId: jobId,
+      title,
+      company,
+      appliedAt: new Date(),
+      answers: [cleanEntry],
+    });
+  }
 }
 
 // ── Mapping helpers ──

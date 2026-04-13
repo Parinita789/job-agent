@@ -5,7 +5,11 @@ async function main() {
   console.log('==================================\n');
   const force = process.argv.includes('--force');
 
-  await generateAllCoverLetters(7, force); // generate for jobs scoring 7+
+  // Accept specific job IDs: --jobs=id1,id2,id3
+  const jobsArg = process.argv.find((a) => a.startsWith('--jobs='));
+  const specificJobIds = jobsArg ? jobsArg.split('=')[1].split(',') : null;
+
+  await generateAllCoverLetters(5, force, specificJobIds);
 }
 
 main().catch(console.error);

@@ -33,6 +33,10 @@ const DEFAULT_RULES: Record<string, string> = {
 let _profile: any = null;
 let _rules: Record<string, string> | null = null;
 
+export function clearRulesCache() {
+  _rules = null;
+}
+
 async function getProfile(): Promise<any> {
   if (!_profile) {
     _profile = await loadProfile();
@@ -58,11 +62,17 @@ async function getRules(): Promise<Record<string, string>> {
   return _rules;
 }
 
+function normalizeQuestion(q: string): string {
+  return q.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 async function matchStructured(question: string): Promise<string | null> {
-  const q = question.toLowerCase();
+  // Always reload rules to pick up newly saved answers
+  _rules = null;
+  const q = normalizeQuestion(question);
   const rules = await getRules();
   for (const [keyword, answer] of Object.entries(rules)) {
-    if (q.includes(keyword)) return answer;
+    if (q.includes(normalizeQuestion(keyword))) return answer;
   }
   return null;
 }

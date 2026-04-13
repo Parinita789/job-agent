@@ -16,8 +16,8 @@ export class PipelineController {
   }
 
   @Post('run-phases')
-  async runPhases(@Body() body: { phases: string[]; scrapeSources?: string[] }) {
-    await this.pipelineService.runSelectedPhases(body.phases, body.scrapeSources);
+  async runPhases(@Body() body: { phases: string[]; scrapeSources?: string[]; applyPlatforms?: string[]; applyLimit?: number; applyJobIds?: string[] }) {
+    await this.pipelineService.runSelectedPhases(body.phases, body.scrapeSources, body.applyPlatforms, body.applyLimit, body.applyJobIds);
     return { message: 'Pipeline started' };
   }
 
@@ -32,6 +32,18 @@ export class PipelineController {
   async runPipeline() {
     await this.pipelineService.runCommand('pipeline');
     return { message: 'Pipeline started' };
+  }
+
+  @Post('generate-cover-letters')
+  async generateCoverLetters(@Body() body: { jobIds: string[] }) {
+    await this.pipelineService.runSelectedPhases(['cover-letters'], undefined, undefined, undefined, body.jobIds);
+    return { message: `Generating cover letters for ${body.jobIds.length} jobs` };
+  }
+
+  @Post('auto-apply')
+  async autoApply(@Body() body: { jobIds: string[] }) {
+    await this.pipelineService.runSelectedPhases(['apply'], undefined, undefined, undefined, body.jobIds);
+    return { message: `Auto-applying to ${body.jobIds.length} jobs` };
   }
 
   @Post('stop')

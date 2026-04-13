@@ -1,13 +1,19 @@
+import { useState } from 'react';
 import type { ScoredJob } from '../types';
 
-type Tab = 'queue' | 'applied' | 'rejected';
+type Tab = 'queue' | 'applied' | 'accepted' | 'rejected';
 
 interface JobTableProps {
   jobs: ScoredJob[];
   activeTab: Tab;
+  selectMode?: boolean;
   onSelectJob: (job: ScoredJob) => void;
   onDismissJob?: (job: ScoredJob) => void;
   onMarkApplied?: (job: ScoredJob) => void;
+  onUpdateStatus?: (job: ScoredJob, status: string) => void;
+  onAutoApply?: (jobIds: string[]) => void;
+  onGenerateCoverLetters?: (jobIds: string[]) => void;
+  onCancelSelect?: () => void;
 }
 
 function formatSalary(min?: number, max?: number): string {
@@ -33,7 +39,31 @@ function scoreClass(score: number): string {
   return 'low';
 }
 
-export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApplied }: JobTableProps) {
+export function JobTable({ jobs, activeTab, selectMode, onSelectJob, onDismissJob, onMarkApplied, onUpdateStatus, onAutoApply, onGenerateCoverLetters, onCancelSelect }: JobTableProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === jobs.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(jobs.map((j) => j.id)));
+    }
+  };
+
+  const exitSelectMode = () => {
+    setSelectedIds(new Set());
+    onCancelSelect?.();
+  };
+
   if (jobs.length === 0) {
     return (
       <div className="empty-state">
@@ -43,7 +73,13 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
   }
 
   const sorted = [...jobs].sort((a, b) => {
-    // New jobs first (scraped within last 24h), then by score
+    if (activeTab === 'applied') {
+      // Applied tab: most recently applied first
+      const aTime = a.applied_at ? new Date(a.applied_at).getTime() : 0;
+      const bTime = b.applied_at ? new Date(b.applied_at).getTime() : 0;
+      return bTime - aTime;
+    }
+    // Queue/Rejected: new jobs first (scraped within last 24h), then by score
     const now = Date.now();
     const aNew = now - new Date(a.scraped_at).getTime() < 86400000 ? 1 : 0;
     const bNew = now - new Date(b.scraped_at).getTime() < 86400000 ? 1 : 0;
@@ -54,9 +90,35 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
   const isNew = (scraped_at: string) => Date.now() - new Date(scraped_at).getTime() < 86400000;
 
   return (
+    <>
+    {activeTab === 'queue' && selectMode && (
+      <div className="auto-apply-bar">
+        <span>{selectedIds.size} job{selectedIds.size !== 1 ? 's' : ''} selected</span>
+        <div className="auto-apply-actions">
+          <button className="cancel-select-btn" onClick={exitSelectMode}>Cancel</button>
+          <button
+            className="generate-cl-btn"
+            disabled={selectedIds.size === 0}
+            onClick={() => { onGenerateCoverLetters?.(Array.from(selectedIds)); exitSelectMode(); }}
+          >
+            Generate Cover Letters ({selectedIds.size})
+          </button>
+          <button
+            className="auto-apply-btn"
+            disabled={selectedIds.size === 0}
+            onClick={() => { onAutoApply?.(Array.from(selectedIds)); exitSelectMode(); }}
+          >
+            Auto Apply ({selectedIds.size})
+          </button>
+        </div>
+      </div>
+    )}
     <table className="job-table">
       <thead>
         <tr>
+          {activeTab === 'queue' && selectMode && (
+            <th><input type="checkbox" checked={selectedIds.size === jobs.length && jobs.length > 0} onChange={toggleAll} /></th>
+          )}
           <th>Score</th>
           <th>Company</th>
           <th>Position</th>
@@ -65,6 +127,7 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
           <th>Platform</th>
           {activeTab === 'queue' && <th>Posted</th>}
           {activeTab === 'applied' && <th>Applied</th>}
+          {activeTab === 'applied' && <th>Status</th>}
           {activeTab === 'rejected' && <th>Reason</th>}
           {activeTab === 'queue' && <th>Apply</th>}
           {activeTab === 'queue' && <th></th>}
@@ -73,6 +136,16 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
       <tbody>
         {sorted.map((job) => (
           <tr key={job.id} onClick={() => onSelectJob(job)}>
+            {activeTab === 'queue' && selectMode && (
+              <td>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(job.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => toggleSelect(job.id)}
+                />
+              </td>
+            )}
             <td>
               <span className={`score ${scoreClass(job.fit_score)}`}>
                 {job.fit_score}
@@ -118,6 +191,25 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
                     {job.applied_at ? new Date(job.applied_at).toLocaleDateString() : '--'}
                   </span>
                 </div>
+              </td>
+            )}
+            {activeTab === 'applied' && (
+              <td>
+                <select
+                  className="status-dropdown"
+                  value={job.status}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    onUpdateStatus?.(job, e.target.value);
+                  }}
+                >
+                  <option value="applied">Waiting</option>
+                  <option value="interviewing">Interviewing</option>
+                  <option value="accepted">Accepted</option>
+                  <option value="declined">Declined</option>
+                  <option value="no_response">No Response</option>
+                </select>
               </td>
             )}
             {activeTab === 'rejected' && (
@@ -170,5 +262,6 @@ export function JobTable({ jobs, activeTab, onSelectJob, onDismissJob, onMarkApp
         ))}
       </tbody>
     </table>
+    </>
   );
 }

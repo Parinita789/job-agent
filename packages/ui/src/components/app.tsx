@@ -9,8 +9,9 @@ import { KeywordManager } from './keyword-manager';
 import { ProfileEditor } from './profile-editor';
 import { FormAnswers } from './form-answers';
 import { CoverLettersPage, type CoverLetterJob } from './cover-letters';
+import { PendingQuestion } from './pending-question';
 
-type Tab = 'queue' | 'applied' | 'rejected' | 'cover-letters';
+type Tab = 'queue' | 'applied' | 'accepted' | 'rejected' | 'cover-letters';
 type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
 
 export function App() {
@@ -25,6 +26,7 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
+  const [autoApplyMode, setAutoApplyMode] = useState(false);
   const [scoreFilter, setScoreFilter] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -91,6 +93,31 @@ export function App() {
     }
   }, []);
 
+  const handleUpdateStatus = useCallback(async (job: ScoredJob, status: string) => {
+    try {
+      await axios.patch(`/api/jobs/${job.id}/status`, { status });
+      setJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, status: status as any } : j));
+    } catch (err) {
+      console.error('Failed to update status:', err);
+    }
+  }, []);
+
+  const handleAutoApply = useCallback(async (jobIds: string[]) => {
+    try {
+      await axios.post('/api/pipeline/auto-apply', { jobIds });
+    } catch (err) {
+      console.error('Failed to start auto-apply:', err);
+    }
+  }, []);
+
+  const handleGenerateCoverLetters = useCallback(async (jobIds: string[]) => {
+    try {
+      await axios.post('/api/pipeline/generate-cover-letters', { jobIds });
+    } catch (err) {
+      console.error('Failed to start cover letter generation:', err);
+    }
+  }, []);
+
   const byPlatform = platformFilter === 'all' ? jobs : jobs.filter((j) => j.source === platformFilter);
   const byScore = scoreFilter > 0 ? byPlatform.filter((j) => j.fit_score === scoreFilter) : byPlatform;
   const filtered = searchQuery
@@ -100,9 +127,13 @@ export function App() {
       )
     : byScore;
   const queue = filtered.filter((j) => j.status === 'to_apply');
-  const applied = filtered.filter((j) => j.status === 'applied');
-  const rejected = filtered.filter((j) => j.status === 'rejected');
-  const tabJobs = activeTab === 'queue' ? queue : activeTab === 'applied' ? applied : rejected;
+  const applied = filtered.filter((j) => ['applied', 'interviewing', 'no_response'].includes(j.status));
+  const accepted = filtered.filter((j) => j.status === 'accepted');
+  const rejected = filtered.filter((j) => ['rejected', 'declined'].includes(j.status));
+  const tabJobs = activeTab === 'queue' ? queue
+    : activeTab === 'applied' ? applied
+    : activeTab === 'accepted' ? accepted
+    : rejected;
 
   if (loading) {
     return (
@@ -145,7 +176,7 @@ export function App() {
       <TabBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        counts={{ queue: queue.length, applied: applied.length, rejected: rejected.length, coverLetters: coverLetterJobs.length }}
+        counts={{ queue: queue.length, applied: applied.length, accepted: accepted.length, rejected: rejected.length, coverLetters: coverLetterJobs.length }}
         onOpenCommands={() => setCommandPanelOpen(true)}
         onOpenKeywords={() => setKeywordManagerOpen(true)}
       />
@@ -187,8 +218,13 @@ export function App() {
                 </button>
               ))}
             </div>
+            {activeTab === 'queue' && !autoApplyMode && (
+              <button className="select-to-apply-btn" onClick={() => setAutoApplyMode(true)}>
+                Select to Auto Apply
+              </button>
+            )}
           </div>
-          <JobTable jobs={tabJobs} activeTab={activeTab} onSelectJob={setSelectedJob} onDismissJob={handleDismissJob} onMarkApplied={handleMarkApplied} />
+          <JobTable jobs={tabJobs} activeTab={activeTab} selectMode={autoApplyMode} onSelectJob={setSelectedJob} onDismissJob={handleDismissJob} onMarkApplied={handleMarkApplied} onUpdateStatus={handleUpdateStatus} onAutoApply={(ids) => { handleAutoApply(ids); setAutoApplyMode(false); }} onGenerateCoverLetters={(ids) => { handleGenerateCoverLetters(ids); setAutoApplyMode(false); }} onCancelSelect={() => setAutoApplyMode(false)} />
         </>
       )}
 
@@ -223,6 +259,7 @@ export function App() {
         isOpen={formAnswersOpen}
         onClose={() => setFormAnswersOpen(false)}
       />
+      <PendingQuestion />
     </div>
   );
 }

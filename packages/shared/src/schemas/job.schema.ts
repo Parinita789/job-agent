@@ -23,7 +23,7 @@ const jobSchema = new mongoose.Schema(
     deal_breaker:      String,
     status: {
       type: String,
-      enum: ['to_apply', 'applied', 'rejected', 'no_response', 'interviewing'],
+      enum: ['to_apply', 'applied', 'rejected', 'no_response', 'interviewing', 'accepted', 'declined'],
       default: 'to_apply',
     },
     applied_at:        { type: Date, default: null },

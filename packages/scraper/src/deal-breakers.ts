@@ -48,5 +48,27 @@ export function checkDealBreakers(job: JobListing): { rejected: boolean; reason?
     };
   }
 
+  // Rule 4 — location outside US
+  const loc = job.location.toLowerCase();
+  const nonUSIndicators = [
+    'india', 'uk', 'united kingdom', 'london', 'germany', 'berlin', 'canada',
+    'toronto', 'vancouver', 'australia', 'sydney', 'melbourne', 'singapore',
+    'japan', 'tokyo', 'france', 'paris', 'netherlands', 'amsterdam',
+    'ireland', 'dublin', 'israel', 'tel aviv', 'brazil', 'são paulo',
+    'mexico', 'spain', 'madrid', 'barcelona', 'sweden', 'stockholm',
+    'poland', 'warsaw', 'romania', 'bucharest', 'ukraine', 'china',
+    'beijing', 'shanghai', 'south korea', 'seoul', 'argentina', 'buenos aires',
+    'colombia', 'bogota', 'chile', 'santiago', 'nigeria', 'lagos',
+    'kenya', 'nairobi', 'south africa', 'cape town', 'egypt', 'cairo',
+  ];
+  const isRemote = loc.includes('remote') && !loc.includes('us') && !loc.includes('united states');
+  const isNonUS = nonUSIndicators.some((c) => loc.includes(c));
+  if (isNonUS && !loc.includes('united states') && !loc.includes(' us') && !loc.includes('usa')) {
+    return {
+      rejected: true,
+      reason: `Location outside US: ${job.location}`,
+    };
+  }
+
   return { rejected: false };
 }

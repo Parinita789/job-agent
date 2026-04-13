@@ -1,9 +1,9 @@
-type Tab = 'queue' | 'applied' | 'rejected' | 'cover-letters';
+type Tab = 'queue' | 'applied' | 'accepted' | 'rejected' | 'cover-letters';
 
 interface TabBarProps {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
-  counts: { queue: number; applied: number; rejected: number; coverLetters: number };
+  counts: { queue: number; applied: number; accepted: number; rejected: number; coverLetters: number };
   onOpenCommands: () => void;
   onOpenKeywords: () => void;
 }
@@ -12,6 +12,7 @@ export function TabBar({ activeTab, onTabChange, counts, onOpenCommands, onOpenK
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: 'queue', label: 'Queue', count: counts.queue },
     { key: 'applied', label: 'Applied', count: counts.applied },
+    { key: 'accepted', label: 'Accepted', count: counts.accepted },
     { key: 'rejected', label: 'Rejected', count: counts.rejected },
     { key: 'cover-letters', label: 'Cover Letters', count: counts.coverLetters },
   ];

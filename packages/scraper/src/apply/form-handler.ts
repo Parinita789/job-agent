@@ -1,7 +1,100 @@
 import { Page } from 'playwright';
-import { answerQuestion } from '../scorer/question-answerer';
+import axios from 'axios';
+import { answerQuestion, setCurrentJob } from '../scorer/question-answerer';
+import { logQuestionAnswer } from '../db';
+import type { ScoredJob } from '../types';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const API_URL = process.env.API_URL || 'http://localhost:3001/api';
+
+/**
+ * Answer a question with pause-and-ask fallback.
+ * Tries rule-based → LLM → if both fail or answer is empty, posts to API and waits for user.
+ */
+export async function answerQuestionWithPause(
+  question: string,
+  type: 'text' | 'textarea' | 'select' | 'radio',
+  job: ScoredJob,
+  options?: string[],
+): Promise<string> {
+  // Ensure current job is set for Q&A logging
+  setCurrentJob({ id: job.id, title: job.title, company: job.company });
+
+  // For select/radio — try rule-based match only, skip LLM (it generates paragraphs)
+  // For text/textarea — try rule-based, then LLM
+  try {
+    const answer = await answerQuestion(question, type, options);
+    if (answer && answer.length > 0) {
+      // For select/radio, verify the answer matches an option
+      if ((type === 'select' || type === 'radio') && options?.length) {
+        const match = options.find(
+          (o) => o.toLowerCase() === answer.toLowerCase() ||
+                 o.toLowerCase().includes(answer.toLowerCase()) ||
+                 answer.toLowerCase().includes(o.toLowerCase()),
+        );
+        if (match) {
+          // Already logged by answerQuestion, return
+          return match;
+        }
+        // No match — fall through to ask user
+      } else {
+        return answer;
+      }
+    }
+  } catch {
+    // Fall through to pause-and-ask
+  }
+
+  // Post to API and wait for user answer
+  const displayQuestion = options?.length
+    ? `"${question}" — pick one of the options`
+    : `"${question}" — type your answer`;
+  console.log(`    ⏸ Waiting for user answer: ${displayQuestion}`);
+
+  try {
+    const { data: pending } = await axios.post(`${API_URL}/form-answers/pending`, {
+      jobTitle: job.title,
+      company: job.company,
+      question,
+      type,
+      options,
+    });
+
+    // Poll every 2 seconds until answered
+    const maxWait = 5 * 60 * 1000; // 5 min timeout
+    const start = Date.now();
+
+    while (Date.now() - start < maxWait) {
+      await sleep(2000);
+
+      const { data: q } = await axios.get(`${API_URL}/form-answers/pending/${pending.id}`);
+      if (q?.answer) {
+        if (q.answer === '__SKIP__') {
+          console.log(`    ⏭ User skipped this question`);
+          return '';
+        }
+        console.log(`    ✓ User answered: "${q.answer}"`);
+        // Log to questionanswers collection — skip bot-internal questions
+        const isInternal = question.toLowerCase().includes('review the form') ||
+          question.toLowerCase().includes('cover letter for') ||
+          question.toLowerCase().includes('bot will detect');
+        if (!isInternal) {
+          await logQuestionAnswer(
+            job.id, job.title, job.company,
+            { question, type, options, answer: q.answer, source: 'rule' as const },
+          ).catch(() => {});
+        }
+        return q.answer;
+      }
+    }
+
+    console.log(`    ⏰ Timed out waiting for answer`);
+  } catch (err) {
+    console.log(`    Failed to post pending question: ${(err as Error).message}`);
+  }
+
+  return '';
+}
 
 async function getFieldLabel(page: Page, element: any): Promise<string> {
   try {

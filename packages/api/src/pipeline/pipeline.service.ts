@@ -15,11 +15,8 @@ const SCRAPER_DIR_RESOLVER = () => path.resolve(process.cwd(), '../scraper');
 
 const PHASE_LIST = [
   { id: 'scrape', label: 'Scrape + Score', name: 'scrape + score', cmd: 'npx', args: ['tsx', 'src/phase2.ts'] },
-  { id: 'alerts', label: 'LinkedIn Alerts', name: 'scrape alerts + score', cmd: 'npx', args: ['tsx', 'src/phase-alerts.ts'] },
-  { id: 'email-alerts', label: 'Email Alerts', name: 'email alerts + score', cmd: 'npx', args: ['tsx', 'src/phase-email-alerts.ts'] },
-  { id: 'gmail-alerts', label: 'Gmail Alerts', name: 'gmail alerts + score', cmd: 'npx', args: ['tsx', 'src/phase-gmail-alerts.ts'] },
+  { id: 'gmail-alerts', label: 'Gmail Alerts', name: 'gmail alerts', cmd: 'npx', args: ['tsx', 'src/phase-gmail-alerts.ts', '--watch', '--interval=60'] },
   { id: 'rescore', label: 'Rescore Jobs', name: 'rescore', cmd: 'npx', args: ['tsx', 'src/rescore.ts'] },
-  { id: 'cover-letters', label: 'Cover Letters', name: 'cover letters', cmd: 'npx', args: ['tsx', 'src/phase3.ts'] },
   { id: 'apply', label: 'Auto Apply', name: 'auto apply', cmd: 'npx', args: ['tsx', 'src/phase4.ts'] },
 ];
 
@@ -126,7 +123,7 @@ export class PipelineService {
     this.runPhasesSequentially(command.phases, scraperDir);
   }
 
-  async runSelectedPhases(phaseIds: string[], scrapeSources?: string[]): Promise<void> {
+  async runSelectedPhases(phaseIds: string[], scrapeSources?: string[], applyPlatforms?: string[], applyLimit?: number, applyJobIds?: string[]): Promise<void> {
     if (this.state.running) {
       throw new ConflictException('A command is already running');
     }
@@ -135,9 +132,18 @@ export class PipelineService {
       .map((id) => {
         const phase = PHASE_LIST.find((p) => p.id === id);
         if (!phase) return null;
-        // Append --sources flag to scrape phase if sources specified
         if (id === 'scrape' && scrapeSources && scrapeSources.length > 0) {
           return { ...phase, args: [...phase.args, `--sources=${scrapeSources.join(',')}`] };
+        }
+        if (id === 'cover-letters' && applyJobIds && applyJobIds.length > 0) {
+          return { ...phase, args: [...phase.args, `--jobs=${applyJobIds.join(',')}`] };
+        }
+        if (id === 'apply') {
+          const args = [...phase.args];
+          if (applyPlatforms && applyPlatforms.length > 0) args.push(`--platforms=${applyPlatforms.join(',')}`);
+          if (applyLimit) args.push(`--limit=${applyLimit}`);
+          if (applyJobIds && applyJobIds.length > 0) args.push(`--jobs=${applyJobIds.join(',')}`);
+          return { ...phase, args };
         }
         return phase;
       })
@@ -238,6 +244,7 @@ export class PipelineService {
         const lines = data.toString().split('\n').filter(Boolean);
         for (const line of lines) {
           this.addLog(line);
+          process.stdout.write(`[pipeline] ${line}\n`);
         }
       });
 
@@ -245,6 +252,7 @@ export class PipelineService {
         const lines = data.toString().split('\n').filter(Boolean);
         for (const line of lines) {
           this.addLog(`[stderr] ${line}`);
+          process.stderr.write(`[pipeline] ${line}\n`);
         }
       });
 
@@ -264,11 +272,11 @@ export class PipelineService {
         reject(err);
       });
 
-      // timeout after 10 minutes
+      // timeout after 2 hours (auto-apply needs time for user to fill forms)
       setTimeout(() => {
         child.kill();
-        reject(new Error('Timed out after 10 minutes'));
-      }, 600000);
+        reject(new Error('Timed out after 2 hours'));
+      }, 7200000);
     });
   }
 }

@@ -4,7 +4,7 @@ import { scoreFitWithLLM } from './scorer/llm-scorer';
 import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJobs } from './db';
 import type { JobListing, ScoredJob } from './types';
 
-const LLM_CONCURRENCY = 2;
+const LLM_CONCURRENCY = 5;
 
 function quickReject(job: JobListing): string | null {
   const t = job.title.toLowerCase();

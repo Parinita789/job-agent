@@ -4,7 +4,7 @@ import { scoreFitWithLLM } from "./scorer/llm-scorer";
 import { connectToDatabase, disconnectDatabase, loadExistingJobs, saveJobs } from "./db";
 import type { ScoredJob, JobListing } from "./types";
 
-const LLM_CONCURRENCY = 2;
+const LLM_CONCURRENCY = 5;
 
 // ── Fast keyword pre-filter (no LLM needed) ────────────────────────
 function quickReject(job: JobListing): string | null {

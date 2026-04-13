@@ -9,7 +9,7 @@ import { checkDealBreakers } from './deal-breakers';
 import { scoreFitWithLLM } from './scorer/llm-scorer';
 import type { JobListing, ScoredJob } from './types';
 
-const LLM_CONCURRENCY = 2;
+const LLM_CONCURRENCY = 5;
 
 function quickReject(job: JobListing): string | null {
   const t = job.title.toLowerCase();
@@ -91,11 +91,9 @@ async function scoreBatch(batch: JobListing[]): Promise<ScoredJob[]> {
   return Promise.all(promises);
 }
 
-async function main() {
+async function main(): Promise<number> {
   console.log('Gmail Job Alerts — Fetch + Scrape + Score');
   console.log('==========================================\n');
-
-  await connectToDatabase();
 
   const existing = await loadExistingJobs();
   const existingIds = new Set(existing.map((j) => j.id));
@@ -121,8 +119,7 @@ async function main() {
 
   if (newJobs.length === 0) {
     console.log('No new jobs from Gmail alerts.');
-    await disconnectDatabase();
-    return;
+    return 0;
   }
 
   // Fast filter
@@ -205,7 +202,38 @@ async function main() {
       .forEach((j) => console.log(`  ${j.fit_score}/10 ${j.title} @ ${j.company}`));
   }
 
-  await disconnectDatabase();
+  return newJobs.length;
 }
 
-main().catch(console.error);
+async function run() {
+  const watchMode = process.argv.includes('--watch');
+  const intervalArg = process.argv.find((a) => a.startsWith('--interval='));
+  const intervalMinutes = intervalArg ? parseInt(intervalArg.split('=')[1], 10) : 5;
+
+  await connectToDatabase();
+
+  if (watchMode) {
+    console.log(`\n📬 Gmail watcher started (checking every ${intervalMinutes} min)\n`);
+    console.log('Press Ctrl+C to stop.\n');
+
+    const poll = async () => {
+      try {
+        const found = await main();
+        if (found > 0) {
+          console.log(`\n✓ Processed ${found} new jobs\n`);
+        }
+      } catch (err) {
+        console.error(`Poll error: ${(err as Error).message}`);
+      }
+    };
+
+    // Run immediately, then on interval
+    await poll();
+    setInterval(poll, intervalMinutes * 60 * 1000);
+  } else {
+    await main();
+    await disconnectDatabase();
+  }
+}
+
+run().catch(console.error);

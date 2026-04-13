@@ -1,5 +1,12 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { execFile } from 'child_process';
+
+type LLMProvider = 'claude-cli' | 'ollama' | 'anthropic';
+
+function getProvider(): LLMProvider {
+  return (process.env.LLM_PROVIDER as LLMProvider) || 'ollama';
+}
 
 export function isDevMode(): boolean {
   return process.env.NODE_ENV !== 'production';
@@ -30,7 +37,32 @@ export function getAnthropicClient(): Anthropic {
   return _anthropicClient;
 }
 
-// ── Unified LLM call — uses Ollama in dev, Anthropic in prod ──
+// ── Claude CLI (subprocess) ──
+function callClaudeCli(prompt: string, system?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fullPrompt = system ? `${system}\n\n${prompt}` : prompt;
+    const claudePath = process.env.CLAUDE_CLI_PATH || 'claude';
+
+    const child = execFile(claudePath, [
+      '-p', fullPrompt,
+      '--output-format', 'text',
+      '--dangerously-skip-permissions',
+      '--model', 'claude-opus-4-6',
+    ], {
+      maxBuffer: 1024 * 1024,
+      timeout: 120000,
+      env: { ...process.env },
+    }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(`Claude CLI failed: ${error.message}`));
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
+// ── Unified LLM call ──
 
 export async function llmChat(prompt: string, options?: {
   system?: string;
@@ -39,32 +71,42 @@ export async function llmChat(prompt: string, options?: {
   jsonMode?: boolean;
 }): Promise<string> {
   const { system, temperature = 0.1, maxTokens = 500, jsonMode = false } = options || {};
+  const provider = getProvider();
 
-  if (isDevMode()) {
-    // Ollama
+  if (provider === 'claude-cli') {
+    const jsonInstruction = jsonMode ? '\n\nRespond with ONLY valid JSON. No markdown, no code blocks, no explanation.' : '';
+    const result = await callClaudeCli(prompt + jsonInstruction, system);
+
+    // Strip markdown code blocks if present
+    const codeBlockMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) return codeBlockMatch[1].trim();
+    return result;
+  }
+
+  if (provider === 'ollama') {
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
     if (system) messages.push({ role: 'system', content: system });
     messages.push({ role: 'user', content: prompt });
 
     const res = await getOllamaClient().chat.completions.create({
-      model: 'llama3:latest',
+      model: process.env.OLLAMA_MODEL || 'llama3:latest',
       messages,
       temperature,
       ...(jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
     });
 
     return res.choices[0].message.content!.trim();
-  } else {
-    // Anthropic
-    const res = await getAnthropicClient().messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: maxTokens,
-      messages: [{ role: 'user', content: system ? `${system}\n\n${prompt}` : prompt }],
-      ...(temperature !== undefined ? { temperature } : {}),
-    });
-
-    return (res.content[0] as any).text.trim();
   }
+
+  // anthropic
+  const res = await getAnthropicClient().messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: system ? `${system}\n\n${prompt}` : prompt }],
+    ...(temperature !== undefined ? { temperature } : {}),
+  });
+
+  return (res.content[0] as any).text.trim();
 }
 
 export async function llmChatWithRetry(prompt: string, options?: {
@@ -81,9 +123,8 @@ export async function llmChatWithRetry(prompt: string, options?: {
     try {
       return await llmChat(prompt, rest);
     } catch (err: any) {
-      const is429 = err?.status === 429 || err?.error?.type === 'rate_limit_error';
-      if ((is429 || isDevMode()) && attempt < retries - 1) {
-        const waitSec = isDevMode() ? 5 * (attempt + 1) : 30 * (attempt + 1);
+      if (attempt < retries - 1) {
+        const waitSec = 5 * (attempt + 1);
         console.log(`    LLM error — waiting ${waitSec}s before retry ${attempt + 2}/${retries}...`);
         await sleep(waitSec * 1000);
         continue;

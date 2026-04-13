@@ -9,13 +9,15 @@ interface Phase {
 
 const PHASE_DESCRIPTIONS: Record<string, string> = {
   scrape: 'Select platforms below',
-  alerts: 'From saved alert feeds',
-  'email-alerts': 'From .eml files in data/email-alerts/',
-  'gmail-alerts': 'Auto-fetch from Gmail inbox',
+  'gmail-alerts': 'Checks Gmail every 1 hr',
   rescore: 'Re-evaluate all jobs',
-  'cover-letters': 'For jobs scoring 5+',
-  apply: 'LinkedIn Easy Apply',
+  apply: 'Select platforms below',
 };
+
+const APPLY_PLATFORMS = [
+  { id: 'linkedin', label: 'LinkedIn' },
+  { id: 'greenhouse', label: 'Greenhouse' },
+];
 
 const SCRAPE_SOURCES = [
   { id: 'linkedin', label: 'LinkedIn' },
@@ -34,6 +36,8 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
   const [phases, setPhases] = useState<Phase[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set(SCRAPE_SOURCES.map((s) => s.id)));
+  const [selectedApplyPlatforms, setSelectedApplyPlatforms] = useState<Set<string>>(new Set(APPLY_PLATFORMS.map((p) => p.id)));
+  const [applyLimit, setApplyLimit] = useState<number>(1);
   const [status, setStatus] = useState<PipelineStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [logOffset, setLogOffset] = useState(0);
@@ -119,6 +123,21 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
 
   const allSelected = phases.length > 0 && selected.size === phases.length;
   const allSourcesSelected = selectedSources.size === SCRAPE_SOURCES.length;
+  const allApplyPlatformsSelected = selectedApplyPlatforms.size === APPLY_PLATFORMS.length;
+
+  const toggleApplyPlatform = (id: string) => {
+    setSelectedApplyPlatforms((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllApplyPlatforms = () => {
+    if (allApplyPlatformsSelected) setSelectedApplyPlatforms(new Set());
+    else setSelectedApplyPlatforms(new Set(APPLY_PLATFORMS.map((p) => p.id)));
+  };
   const toggleAll = () => allSelected ? setSelected(new Set()) : setSelected(new Set(phases.map((p) => p.id)));
   const toggleAllSources = () => allSourcesSelected ? setSelectedSources(new Set()) : setSelectedSources(new Set(SCRAPE_SOURCES.map((s) => s.id)));
 
@@ -137,7 +156,9 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
       setLogOffset(0);
       const phaseIds = phases.filter((p) => selected.has(p.id)).map((p) => p.id);
       const scrapeSources = selected.has('scrape') ? Array.from(selectedSources) : undefined;
-      await axios.post('/api/pipeline/run-phases', { phases: phaseIds, scrapeSources });
+      const applyPlatforms = selected.has('apply') ? Array.from(selectedApplyPlatforms) : undefined;
+      const limitVal = selected.has('apply') ? applyLimit : undefined;
+      await axios.post('/api/pipeline/run-phases', { phases: phaseIds, scrapeSources, applyPlatforms, applyLimit: limitVal });
       setStatus({
         running: true,
         phase: 'starting',
@@ -156,6 +177,7 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
 
   const running = status?.running ?? false;
   const scrapeSelected = selected.has('scrape');
+  const applySelected = selected.has('apply');
 
   // ── Config Modal (when not running) ──
   const configModal = isOpen && !running ? (
@@ -192,12 +214,36 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
                   ))}
                 </div>
               )}
+              {phase.id === 'apply' && applySelected && (
+                <div className="source-picker">
+                  <label className="source-item">
+                    <input type="checkbox" checked={allApplyPlatformsSelected} onChange={toggleAllApplyPlatforms} />
+                    <span>All platforms</span>
+                  </label>
+                  {APPLY_PLATFORMS.map((p) => (
+                    <label key={p.id} className="source-item">
+                      <input type="checkbox" checked={selectedApplyPlatforms.has(p.id)} onChange={() => toggleApplyPlatform(p.id)} />
+                      <span>{p.label}</span>
+                    </label>
+                  ))}
+                  <div className="apply-limit">
+                    <span>Limit:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={applyLimit}
+                      onChange={(e) => setApplyLimit(Math.max(1, parseInt(e.target.value) || 1))}
+                    />
+                    <span className="apply-limit-hint">jobs</span>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
           <div className="pipeline-actions">
             <button
               className="run-btn"
-              disabled={selected.size === 0 || (scrapeSelected && selectedSources.size === 0)}
+              disabled={selected.size === 0 || (scrapeSelected && selectedSources.size === 0) || (applySelected && selectedApplyPlatforms.size === 0)}
               onClick={runSelected}
             >
               Run {selected.size === phases.length ? 'Full Pipeline' : `${selected.size} Phase${selected.size !== 1 ? 's' : ''}`}
@@ -205,17 +251,6 @@ export function CommandPanel({ isOpen, onClose, onComplete }: CommandPanelProps)
           </div>
         </div>
 
-        {logs.length > 0 && (
-          <>
-            <div className="log-viewer" ref={logRef}>
-              {logs.map((line, i) => (
-                <div key={i} className={`log-line ${logLineClass(line)}`}>{line}</div>
-              ))}
-            </div>
-            {status?.error && <div className="command-error">{status.error}</div>}
-            {status?.lastRunAt && <div className="command-done">Completed at {new Date(status.lastRunAt).toLocaleTimeString()}</div>}
-          </>
-        )}
       </div>
     </div>
   ) : null;
