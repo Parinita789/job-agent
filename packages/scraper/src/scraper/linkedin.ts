@@ -251,6 +251,7 @@ export async function scrapeLinkedIn(
     }
 
     const jobCards = [];
+    const seenCardIds = new Set<string>();
     for (const card of allCards) {
       const hasTitle = await card
         .$(
@@ -265,10 +266,22 @@ export async function scrapeLinkedIn(
         .$eval('*', (el: Element) => el.textContent?.trim() ?? '')
         .catch(() => '');
 
-      if (hasTitle || cardText.length > 50) jobCards.push(card);
+      if (hasTitle || cardText.length > 50) {
+        // Dedup cards by job URL — overlapping selectors can match same job twice
+        const cardUrl = await card
+          .$eval('a[href*="/jobs/view/"]', (el: Element) => (el as HTMLAnchorElement).href ?? '')
+          .catch(() => '');
+        const idMatch = cardUrl.match(/\/jobs\/view\/(\d+)/);
+        const cardId = idMatch?.[1] || cardText.slice(0, 80);
+
+        if (!seenCardIds.has(cardId)) {
+          seenCardIds.add(cardId);
+          jobCards.push(card);
+        }
+      }
     }
 
-    console.log(`Found ${jobCards.length} cards with content\n`);
+    console.log(`Found ${jobCards.length} unique cards (from ${allCards.length} elements)\n`);
 
     if (jobCards.length === 0) {
       // dump all selectors found on page for debugging

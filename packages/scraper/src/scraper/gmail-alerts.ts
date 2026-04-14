@@ -49,10 +49,8 @@ async function scrapeJobPage(
   url: string,
 ): Promise<JobListing | null> {
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-    await sleep(1500 + Math.random() * 1500);
-
-    await page.waitForSelector('h1', { timeout: 10000 }).catch(() => null);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.waitForSelector('h1', { timeout: 8000 }).catch(() => null);
 
     const title = await page.$eval('h1', (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
 
@@ -109,7 +107,7 @@ async function scrapeJobPage(
   }
 }
 
-export async function fetchGmailAlerts(): Promise<JobListing[]> {
+export async function fetchGmailAlerts(existingUrls?: Set<string>): Promise<JobListing[]> {
   const email = process.env.GMAIL_EMAIL || 'jobhunt2k26@gmail.com';
   const password = process.env.GMAIL_APP_PASSWORD;
 
@@ -187,8 +185,24 @@ export async function fetchGmailAlerts(): Promise<JobListing[]> {
 
   if (allUrls.length === 0) return [];
 
+  // Skip URLs already in the database
+  if (existingUrls && existingUrls.size > 0) {
+    const before = allUrls.length;
+    const filtered = allUrls.filter((u) => !existingUrls.has(u));
+    if (before !== filtered.length) {
+      console.log(`  Skipped ${before - filtered.length} already-tracked URLs`);
+    }
+    allUrls.length = 0;
+    allUrls.push(...filtered);
+  }
+
+  if (allUrls.length === 0) {
+    console.log('  All URLs already tracked');
+    return [];
+  }
+
   // Scrape job details from LinkedIn
-  console.log(`  Scraping ${allUrls.length} job pages...`);
+  console.log(`  Scraping ${allUrls.length} job pages (5 in parallel)...`);
 
   const browser = await chromium.launch({
     headless: true,
@@ -214,15 +228,38 @@ export async function fetchGmailAlerts(): Promise<JobListing[]> {
     } catch { /* ignore */ }
   }
 
-  const page = await context.newPage();
   const jobs: JobListing[] = [];
+  const PARALLEL = 5;
 
-  for (let i = 0; i < allUrls.length; i++) {
-    console.log(`  Scraping ${i + 1}/${allUrls.length}: ${allUrls[i]}`);
-    const job = await scrapeJobPage(page, allUrls[i]);
-    if (job) {
-      console.log(`    ${job.title} @ ${job.company}`);
-      jobs.push(job);
+  // Scrape in parallel batches of 5
+  for (let i = 0; i < allUrls.length; i += PARALLEL) {
+    const batch = allUrls.slice(i, i + PARALLEL);
+    const batchNum = Math.floor(i / PARALLEL) + 1;
+    const totalBatches = Math.ceil(allUrls.length / PARALLEL);
+    console.log(`  Batch ${batchNum}/${totalBatches}: scraping ${batch.length} jobs in parallel...`);
+
+    const results = await Promise.all(
+      batch.map(async (url) => {
+        const page = await context.newPage();
+        try {
+          const job = await scrapeJobPage(page, url);
+          if (job) console.log(`    ✓ ${job.title} @ ${job.company}`);
+          return job;
+        } catch {
+          return null;
+        } finally {
+          await page.close().catch(() => {});
+        }
+      }),
+    );
+
+    for (const job of results) {
+      if (job) jobs.push(job);
+    }
+
+    // Small delay between batches only
+    if (i + PARALLEL < allUrls.length) {
+      await sleep(500 + Math.random() * 500);
     }
   }
 

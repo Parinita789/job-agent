@@ -1,6 +1,33 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { UserModel, llmChat } from '@job-agent/shared';
+import { UserModel } from '@job-agent/shared';
+import * as fs from 'fs';
+import * as path from 'path';
+
 const pdfParse = require('pdf-parse');
+const RESUME_DIR = path.resolve(__dirname, '../../../scraper/data/resume');
+
+// Direct HTTP call to Ollama — bypasses Claude CLI overhead entirely
+async function callOllamaDirectly(prompt: string): Promise<string> {
+  const baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1';
+  const model = process.env.OLLAMA_MODEL || 'llama3:latest';
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: 'Respond with ONLY valid JSON. No markdown, no explanation.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+    }),
+  });
+
+  const data = await response.json() as any;
+  return data.choices[0].message.content.trim();
+}
 
 @Injectable()
 export class ProfileService {
@@ -25,14 +52,22 @@ export class ProfileService {
     return updated;
   }
 
-  async parseResumeAndCreateProfile(fileBuffer: Buffer): Promise<any> {
-    console.log('[Resume] Starting PDF parse...');
+  async parseResumeAndCreateProfile(fileBuffer: Buffer, fileName: string): Promise<any> {
+    console.log('[Resume] Starting...');
 
+    // Save resume to scraper/data/resume/
+    fs.mkdirSync(RESUME_DIR, { recursive: true });
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const resumePath = path.join(RESUME_DIR, safeName);
+    fs.writeFileSync(resumePath, fileBuffer);
+    console.log(`[Resume] Saved to: ${resumePath}`);
+
+    // Extract text from PDF
     let resumeText: string;
     try {
       const pdf = await pdfParse(fileBuffer);
       resumeText = pdf.text;
-      console.log(`[Resume] Extracted ${resumeText.length} chars from PDF`);
+      console.log(`[Resume] Extracted ${resumeText.length} chars`);
     } catch (err) {
       console.error('[Resume] PDF parse failed:', (err as Error).message);
       throw new Error(`Failed to read PDF: ${(err as Error).message}`);
@@ -42,107 +77,30 @@ export class ProfileService {
       throw new Error('Could not extract text from PDF');
     }
 
-    const prompt = `Extract a structured candidate profile from this resume. Return ONLY valid JSON matching this exact schema — no other text, no markdown, no explanation:
+    const prompt = `Extract a candidate profile from this resume as JSON. No markdown, no explanation, ONLY the JSON object.
 
-{
-  "meta": { "version": "1.0", "last_updated": "${new Date().toISOString().split('T')[0]}" },
-  "personal": {
-    "name": "",
-    "email": "",
-    "phone": "",
-    "location": "",
-    "linkedin": "",
-    "github": ""
-  },
-  "experience": {
-    "total_years": 0,
-    "current_level": "",
-    "summary": ""
-  },
-  "skills": {
-    "languages": [],
-    "frameworks": [],
-    "databases": [],
-    "messaging": [],
-    "cloud": [],
-    "devops": [],
-    "architecture": [],
-    "ai": [],
-    "tools": [],
-    "methodologies": []
-  },
-  "top_achievements": [{ "company": "", "impact": "" }],
-  "work_history": [{ "company": "", "location": "", "title": "", "start": "YYYY-MM", "end": "YYYY-MM or present", "duration_years": 0 }],
-  "preferences": {
-    "target_roles": [],
-    "location": {
-      "current_city": "",
-      "remote": true,
-      "hybrid_us": true,
-      "onsite": true,
-      "international_remote": false
-    },
-    "employment_type": ["full-time"],
-    "visa_sponsorship_required": false,
-    "company_size": { "growth_startup": true, "mid_size": true, "enterprise": true, "early_startup": false },
-    "excluded_industries": [],
-    "preferred_domains": []
-  },
-  "compensation": {
-    "currency": "USD",
-    "base_salary_min": 0,
-    "base_salary_preferred": 0,
-    "equity": "open to discussing",
-    "notes": ""
-  },
-  "deal_breakers": [],
-  "strengths_for_agent": {
-    "use_for_cover_letter": [],
-    "ats_keywords": []
-  }
-}
-
-Rules:
-- Extract ALL skills mentioned and categorize them correctly
-- Calculate total_years from work history dates
-- For top_achievements, pick 2-4 most impactful bullet points with quantified results
-- For current_level, infer from most recent job title
-- Summary should be 1-2 sentences about their specialization
-- target_roles should be realistic next roles based on experience
-- ats_keywords should include the most important technical terms from the resume
-- use_for_cover_letter should be 3-5 key strengths/achievements
-- preferred_domains should be inferred from work history industries
-- Leave compensation fields as 0 (user will fill in)
-- Set location fields based on the resume's listed location
+Fields: personal{name,email,phone,location,linkedin,github}, experience{total_years,current_level,summary}, skills{languages[],frameworks[],databases[],messaging[],cloud[],devops[],architecture[],ai[],tools[],methodologies[]}, top_achievements[{company,impact}] (2-4 with metrics), work_history[{company,location,title,start,end,duration_years}], preferences{target_roles[],location{current_city,remote:true,hybrid_us:true,onsite:true},employment_type:["full-time"],preferred_domains[]}, compensation{base_salary_min:0,base_salary_preferred:0}, deal_breakers[], strengths_for_agent{use_for_cover_letter[],ats_keywords[]}
 
 Resume:
-${resumeText.slice(0, 8000)}`;
+${resumeText.slice(0, 4000)}`;
 
-    console.log('[Resume] Sending to LLM for parsing...');
+    console.log('[Resume] Sending to LLM...');
+    const startTime = Date.now();
     let responseText: string;
     try {
-      responseText = await llmChat(prompt, {
-        system:
-          'You are a JSON-only assistant. Always respond with valid JSON. No explanations, no markdown, no preamble.',
-        temperature: 0.1,
-        maxTokens: 2000,
-        jsonMode: true,
-      });
+      responseText = await callOllamaDirectly(prompt);
     } catch (err) {
-      console.error('[Resume] LLM call failed:', (err as Error).message);
-      throw new Error(`LLM connection failed: ${(err as Error).message}`);
+      console.error('[Resume] LLM failed:', (err as Error).message);
+      throw new Error(`Resume parsing failed: ${(err as Error).message}`);
     }
-    console.log(`[Resume] LLM response: ${responseText.length} chars`);
+    console.log(`[Resume] Response: ${responseText.length} chars in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
-    // Extract JSON from response — handle markdown blocks, preamble text, etc.
+    // Extract JSON
     let jsonStr = responseText;
-
-    // Try markdown code block first
     const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (codeBlockMatch) {
       jsonStr = codeBlockMatch[1].trim();
     } else {
-      // Find the first { and last } to extract JSON object
       const firstBrace = responseText.indexOf('{');
       const lastBrace = responseText.lastIndexOf('}');
       if (firstBrace !== -1 && lastBrace > firstBrace) {
@@ -154,10 +112,7 @@ ${resumeText.slice(0, 8000)}`;
     try {
       profile = JSON.parse(jsonStr);
     } catch {
-      console.error(
-        'Failed to parse LLM response as JSON. Raw response:',
-        responseText.slice(0, 500),
-      );
+      console.error('Failed to parse JSON. Raw:', responseText.slice(0, 500));
       throw new Error('LLM returned invalid JSON. Try uploading again.');
     }
 

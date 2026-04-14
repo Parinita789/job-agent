@@ -64,6 +64,7 @@ const COMMANDS: Record<string, { label: string; phases: { name: string; cmd: str
 @Injectable()
 export class PipelineService {
   private currentChild: ChildProcess | null = null;
+  private autoApplyChild: ChildProcess | null = null;
   private cancelled = false;
 
   private state: PipelineState = {
@@ -125,7 +126,45 @@ export class PipelineService {
 
   async runSelectedPhases(phaseIds: string[], scrapeSources?: string[], applyPlatforms?: string[], applyLimit?: number, applyJobIds?: string[]): Promise<void> {
     if (this.state.running) {
-      throw new ConflictException('A command is already running');
+      // Allow auto-apply to run concurrently with scraping
+      const isAutoApply = phaseIds.length === 1 && phaseIds[0] === 'apply';
+      const isCoverLetters = phaseIds.length === 1 && phaseIds[0] === 'cover-letters';
+      if (!isAutoApply && !isCoverLetters) {
+        throw new ConflictException('A command is already running');
+      }
+      // Spawn independently without blocking the running pipeline
+      const actionName = isAutoApply ? 'Auto Apply' : 'Cover Letters';
+      console.log(`[Pipeline] Running ${actionName} concurrently with:`, this.state.command);
+      const phaseId = isAutoApply ? 'apply' : 'cover-letters';
+      const phase = PHASE_LIST.find((p) => p.id === phaseId);
+      if (!phase) {
+        // Phase might have been removed from PHASE_LIST (cover-letters was removed)
+        // Use raw command
+        const scraperDir = SCRAPER_DIR_RESOLVER();
+        const args = ['tsx', phaseId === 'apply' ? 'src/phase4.ts' : 'src/phase3.ts'];
+        if (applyJobIds && applyJobIds.length > 0) args.push(`--jobs=${applyJobIds.join(',')}`);
+        if (applyPlatforms && applyPlatforms.length > 0) args.push(`--platforms=${applyPlatforms.join(',')}`);
+        if (applyLimit) args.push(`--limit=${applyLimit}`);
+        this.addLog(`--- ${actionName} started (concurrent) ---`);
+        this.spawnWithLogs('npx', args, scraperDir).then(() => {
+          this.addLog(`--- ${actionName} completed ---`);
+        }).catch((err) => {
+          this.addLog(`ERROR: ${actionName} failed — ${(err as Error).message}`);
+        });
+      } else {
+        const args = [...phase.args];
+        if (applyPlatforms && applyPlatforms.length > 0) args.push(`--platforms=${applyPlatforms.join(',')}`);
+        if (applyLimit) args.push(`--limit=${applyLimit}`);
+        if (applyJobIds && applyJobIds.length > 0) args.push(`--jobs=${applyJobIds.join(',')}`);
+        const scraperDir = SCRAPER_DIR_RESOLVER();
+        this.addLog(`--- ${actionName} started (concurrent) ---`);
+        this.spawnWithLogs(phase.cmd, args, scraperDir).then(() => {
+          this.addLog(`--- ${actionName} completed ---`);
+        }).catch((err) => {
+          this.addLog(`ERROR: ${actionName} failed — ${(err as Error).message}`);
+        });
+      }
+      return;
     }
 
     const phases = phaseIds

@@ -102,7 +102,7 @@ async function main(): Promise<number> {
   console.log(`Existing jobs in tracker: ${existing.length}\n`);
 
   // Fetch from Gmail
-  const alertJobs = await fetchGmailAlerts();
+  const alertJobs = await fetchGmailAlerts(existingUrls);
 
   // Deduplicate
   const newJobs = alertJobs.filter((j) => {

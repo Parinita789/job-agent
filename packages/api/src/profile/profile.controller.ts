@@ -23,7 +23,7 @@ export class ProfileController {
       return { error: 'No file uploaded' };
     }
     try {
-      return await this.profileService.parseResumeAndCreateProfile(file.buffer);
+      return await this.profileService.parseResumeAndCreateProfile(file.buffer, file.originalname || 'resume.pdf');
     } catch (err) {
       return { error: (err as Error).message };
     }
