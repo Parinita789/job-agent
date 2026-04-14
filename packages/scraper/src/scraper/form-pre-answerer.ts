@@ -13,7 +13,7 @@ interface ScrapedField {
   required: boolean;
 }
 
-function getProfileAnswer(label: string, profile: any, jobCompany?: string): string | null {
+export function getProfileAnswer(label: string, profile: any, jobCompany?: string): string | null {
   const l = label.toLowerCase();
 
   // ── Identity ──
@@ -97,10 +97,10 @@ function getProfileAnswer(label: string, profile: any, jobCompany?: string): str
   if (l.includes('hispanic') || l.includes('latino')) return 'No';
 
   // ── Demographics ──
+  if (l.includes('transgender')) return 'No';
   if (l.includes('gender') && l.includes('identify')) return 'Woman';
   if (l.includes('gender')) return 'Female';
-  if (l.includes('identify as') && !l.includes('race') && !l.includes('ethnicity') && !l.includes('gender') && !l.includes('veteran') && !l.includes('disability') && !l.includes('orientation')) return 'Cisgender';
-  if (l.includes('transgender')) return 'No';
+  if (l.includes('identify as') && !l.includes('race') && !l.includes('ethnicity') && !l.includes('veteran') && !l.includes('disability') && !l.includes('orientation')) return 'Cisgender';
   if (l.includes('race') || l.includes('ethnicity')) return 'Asian';
   if (l.includes('veteran')) return 'No';
   if (l.includes('disability')) return 'No';
@@ -148,7 +148,7 @@ function getProfileAnswer(label: string, profile: any, jobCompany?: string): str
   return null;
 }
 
-function matchRule(label: string, rules: Record<string, string>): string | null {
+export function matchRule(label: string, rules: Record<string, string>): string | null {
   const normalized = label
     .toLowerCase()
     .replace(/[^\w\s]/g, '')
@@ -160,7 +160,7 @@ function matchRule(label: string, rules: Record<string, string>): string | null 
   return null;
 }
 
-function matchOption(answer: string, options: string[]): string | null {
+export function matchOption(answer: string, options: string[]): string | null {
   if (options.length === 0) return answer;
   const a = answer.toLowerCase().trim();
 

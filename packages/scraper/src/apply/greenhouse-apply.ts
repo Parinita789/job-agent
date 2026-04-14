@@ -739,7 +739,7 @@ function getDirectAnswer(
 
 // Smart matcher: maps a short answer (e.g. "United States", "Female", "No") to the best dropdown option
 // without LLM — handles common variations deterministically
-function smartMatchOption(answer: string, options: string[], label: string): string | null {
+export function smartMatchOption(answer: string, options: string[], label: string): string | null {
   const a = answer.toLowerCase().trim();
   const l = label.toLowerCase();
 
@@ -747,12 +747,7 @@ function smartMatchOption(answer: string, options: string[], label: string): str
   const exact = options.find((o) => o.toLowerCase().trim() === a);
   if (exact) return exact;
 
-  // Contains match (both directions)
-  const contains = options.find((o) => {
-    const ol = o.toLowerCase();
-    return ol.includes(a) || a.includes(ol);
-  });
-  if (contains) return contains;
+  // ── Specific matchers BEFORE generic contains (to avoid wrong partial matches) ──
 
   // Country variations: "United States" → "US", "USA", "United States of America"
   if (a === 'united states' || a === 'us' || a === 'usa') {
@@ -887,6 +882,13 @@ function smartMatchOption(answer: string, options: string[], label: string): str
       ) || null
     );
   }
+
+  // Contains match (both directions) — AFTER specific matchers
+  const contains = options.find((o) => {
+    const ol = o.toLowerCase();
+    return ol.includes(a) || a.includes(ol);
+  });
+  if (contains) return contains;
 
   // Starts-with match
   const startsWith = options.find((o) => o.toLowerCase().startsWith(a));
