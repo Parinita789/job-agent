@@ -10,7 +10,7 @@ export interface CompanyConfig {
 // (e.g. boards.greenhouse.io/{slug}/jobs/123) and run npm run scraper:verify
 export const TARGET_COMPANIES: CompanyConfig[] = [
   // ── Fintech ───────────────────────────────────────────────────────
-  { name: 'Stripe', ats: 'greenhouse', slug: 'stripe', domain: 'Fintech' },
+  // { name: 'Stripe', ats: 'greenhouse', slug: 'stripe', domain: 'Fintech' },
   { name: 'Brex', ats: 'greenhouse', slug: 'brex', domain: 'Fintech' },
   { name: 'Chime', ats: 'greenhouse', slug: 'chime', domain: 'Fintech' },
   { name: 'Robinhood', ats: 'greenhouse', slug: 'robinhood', domain: 'Fintech' },

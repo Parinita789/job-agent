@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ScoredJob } from '../types';
 
-type Tab = 'queue' | 'applied' | 'accepted' | 'rejected';
+type Tab = 'queue' | 'applied' | 'accepted' | 'rejected' | 'prepare';
 
 interface JobTableProps {
   jobs: ScoredJob[];

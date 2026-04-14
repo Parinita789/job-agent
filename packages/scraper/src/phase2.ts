@@ -205,31 +205,17 @@ async function scrapeAllSources(sources: Source[] = ALL_SOURCES): Promise<JobLis
   return all;
 }
 
-async function main() {
-  // Parse --sources flag: e.g. --sources linkedin,greenhouse
-  const sourcesArg = process.argv.find((a) => a.startsWith('--sources='));
-  const sources: Source[] = sourcesArg
-    ? (sourcesArg.split('=')[1].split(',') as Source[])
-    : ALL_SOURCES;
-
-  console.log('Phase 2 — Multi-Source Job Scraper');
-  console.log(`Sources: ${sources.join(', ')}`);
-  console.log('=====================================\n');
-
-  await connectToDatabase();
-
-  const existingJobs = await loadJobs();
-  const existingIds = new Set(existingJobs.map((j) => j.id));
-  console.log(`Existing jobs in tracker: ${existingJobs.length}\n`);
-
-  // ── scrape selected sources ────────────────────────────────────────
-  const allRawJobs = await scrapeAllSources(sources);
-
-  // ── deduplicate ────────────────────────────────────────────────────
-  const seenIds = new Set<string>();
-  const seenKeys = new Set(existingJobs.map((j) => `${j.company}|||${j.title}`.toLowerCase()));
-  const seenUrls = new Set(existingJobs.map((j) => j.url).filter(Boolean));
-  const uniqueNewJobs = allRawJobs.filter((job) => {
+// Dedup, filter, and score a batch of raw jobs
+async function dedupFilterScore(
+  rawJobs: JobListing[],
+  sourceName: string,
+  seenIds: Set<string>,
+  seenKeys: Set<string>,
+  seenUrls: Set<string>,
+  existingIds: Set<string>,
+): Promise<{ total: number; deduped: number; filtered: number; scored: number }> {
+  // Dedup
+  const unique = rawJobs.filter((job) => {
     const key = `${job.company}|||${job.title}`.toLowerCase();
     if (seenIds.has(job.id) || existingIds.has(job.id)) return false;
     if (seenKeys.has(key)) return false;
@@ -240,97 +226,230 @@ async function main() {
     return true;
   });
 
-  // Log dedup breakdown by reason
-  let dupById = 0, dupByKey = 0, dupByUrl = 0;
-  for (const job of allRawJobs) {
-    const key = `${job.company}|||${job.title}`.toLowerCase();
-    if (existingIds.has(job.id)) { dupById++; continue; }
-    if (seenKeys.has(key) && !seenIds.has(job.id)) { dupByKey++; continue; }
-    if (job.url && seenUrls.has(job.url) && !seenIds.has(job.id)) { dupByUrl++; continue; }
-  }
+  console.log(`  Dedup: ${rawJobs.length} → ${unique.length} new`);
 
-  console.log('\n' + '━'.repeat(45));
-  console.log('SCRAPE COMPLETE');
-  console.log('━'.repeat(45));
-  console.log(`Total scraped:   ${allRawJobs.length}`);
-  console.log(`After dedup:     ${uniqueNewJobs.length}`);
-  console.log(`Already tracked: ${allRawJobs.length - uniqueNewJobs.length}`);
-  if (allRawJobs.length - uniqueNewJobs.length > 0) {
-    console.log(`  - by ID:           ${dupById}`);
-    console.log(`  - by company+title: ${dupByKey}`);
-    console.log(`  - by URL:          ${dupByUrl}`);
-  }
+  if (unique.length === 0) return { total: rawJobs.length, deduped: 0, filtered: 0, scored: 0 };
 
-  if (uniqueNewJobs.length === 0) {
-    console.log('\nNo new jobs to process.');
-    return;
-  }
-
-  // ── Layer 1: Fast filters (deal-breakers + keyword pre-filter) ────
-  console.log(`\nLayer 1 — Fast filtering ${uniqueNewJobs.length} jobs...\n`);
-
-  const newScoredJobs: ScoredJob[] = [];
+  // Fast filter
+  const rejected: ScoredJob[] = [];
   const needsLLM: JobListing[] = [];
 
-  for (const job of uniqueNewJobs) {
+  for (const job of unique) {
     const dealBreaker = checkDealBreakers(job);
     if (dealBreaker.rejected) {
-      const rejected: ScoredJob = {
+      rejected.push({
         ...job, fit_score: 0, apply: false, matched_skills: [], missing_skills: [],
         reason: dealBreaker.reason!, deal_breaker: dealBreaker.reason, status: 'rejected',
-      };
-      newScoredJobs.push(rejected);
+      });
       continue;
     }
-
-    const quickRejectReason = quickReject(job);
-    if (quickRejectReason) {
-      const rejected: ScoredJob = {
+    const qr = quickReject(job);
+    if (qr) {
+      rejected.push({
         ...job, fit_score: 0, apply: false, matched_skills: [], missing_skills: [],
-        reason: quickRejectReason, status: 'rejected',
-      };
-      newScoredJobs.push(rejected);
+        reason: qr, status: 'rejected',
+      });
       continue;
     }
-
     needsLLM.push(job);
   }
 
-  // Save fast-filtered jobs immediately
-  if (newScoredJobs.length > 0) await persistJobs(newScoredJobs);
+  if (rejected.length > 0) await persistJobs(rejected);
+  console.log(`  Filter: ${rejected.length} rejected, ${needsLLM.length} need LLM`);
 
-  const filtered = uniqueNewJobs.length - needsLLM.length;
-  console.log(`  Filtered out: ${filtered} (deal-breakers + wrong stack)`);
-  console.log(`  Need LLM:    ${needsLLM.length}`);
-
-  // ── Layer 2: LLM scoring in batches ───────────────────────────────
+  // LLM scoring in batches
+  const highScoreJobs: ScoredJob[] = [];
   if (needsLLM.length > 0) {
     const totalBatches = Math.ceil(needsLLM.length / LLM_CONCURRENCY);
-    console.log(`\nLayer 2 — LLM scoring ${needsLLM.length} jobs (${totalBatches} batches of ${LLM_CONCURRENCY})...\n`);
-
-    let scored_count = 0;
     for (let i = 0; i < needsLLM.length; i += LLM_CONCURRENCY) {
       const batch = needsLLM.slice(i, i + LLM_CONCURRENCY);
       const batchNum = Math.floor(i / LLM_CONCURRENCY) + 1;
 
-      console.log(`[Batch ${batchNum}/${totalBatches}] Scoring ${batch.length} jobs...`);
-      batch.forEach((j) => console.log(`  - ${j.title} @ ${j.company}`));
-
+      console.log(`  [${sourceName} ${batchNum}/${totalBatches}] Scoring ${batch.length}...`);
       const scored = await scoreBatch(batch);
 
       for (const s of scored) {
-        console.log(`  ${s.fit_score}/10 ${s.fit_score >= 5 ? '✓' : '✗'} ${s.title} @ ${s.company}`);
-        newScoredJobs.push(s);
+        console.log(`    ${s.fit_score}/10 ${s.fit_score >= 5 ? '✓' : '✗'} ${s.title} @ ${s.company}`);
+        if (s.fit_score >= 7) highScoreJobs.push(s);
       }
-
-      // Save batch to DB
       await persistJobs(scored);
-      scored_count += scored.length;
-      console.log(`  Saved. Progress: ${scored_count}/${needsLLM.length}\n`);
     }
   }
 
-  // ── final summary ──────────────────────────────────────────────────
+  // Pre-scrape application forms for 7+ scored jobs
+  if (highScoreJobs.length > 0) {
+    try {
+      const { scrapeApplicationForms } = await import('./scraper/form-scraper');
+      console.log(`\n  Pre-scraping forms for ${highScoreJobs.length} high-score jobs...`);
+      await scrapeApplicationForms(highScoreJobs);
+    } catch (err) {
+      console.error(`  Form pre-scrape failed: ${(err as Error).message}`);
+    }
+  }
+
+  return { total: rawJobs.length, deduped: unique.length, filtered: rejected.length, scored: needsLLM.length };
+}
+
+async function main() {
+  const sourcesArg = process.argv.find((a) => a.startsWith('--sources='));
+  const sources: Source[] = sourcesArg
+    ? (sourcesArg.split('=')[1].split(',') as Source[])
+    : ALL_SOURCES;
+
+  console.log('Phase 2 — Multi-Source Job Scraper (per-source scoring)');
+  console.log(`Sources: ${sources.join(', ')}`);
+  console.log('=====================================\n');
+
+  await connectToDatabase();
+
+  const existingJobs = await loadJobs();
+  const existingIds = new Set(existingJobs.map((j) => j.id));
+  console.log(`Existing jobs in tracker: ${existingJobs.length}\n`);
+
+  // Shared dedup sets — accumulate across sources
+  const seenIds = new Set<string>();
+  const seenKeys = new Set(existingJobs.map((j) => `${j.company}|||${j.title}`.toLowerCase()));
+  const seenUrls = new Set(existingJobs.map((j) => j.url).filter(Boolean));
+
+  const enabled = new Set(sources);
+  const stats = { totalScraped: 0, totalNew: 0, totalFiltered: 0, totalScored: 0 };
+
+  // ── Source 1: Greenhouse (API-based, score per company for real-time results) ──
+  if (enabled.has('greenhouse')) {
+    console.log('━'.repeat(45));
+    console.log('SOURCE — Greenhouse (scrape + score per company)');
+    console.log('━'.repeat(45) + '\n');
+
+    const greenhouseCompanies = TARGET_COMPANIES.filter((c) => c.ats === 'greenhouse');
+
+    for (const company of greenhouseCompanies) {
+      const jobs = await scrapeGreenhouse(company.slug, company.name);
+      if (jobs.length > 0) {
+        const r = await dedupFilterScore(jobs, company.name, seenIds, seenKeys, seenUrls, existingIds);
+        stats.totalScraped += r.total;
+        stats.totalNew += r.deduped;
+        stats.totalFiltered += r.filtered;
+        stats.totalScored += r.scored;
+      }
+    }
+  }
+
+  // ── Source 2: LinkedIn (score per query for real-time results) ──
+  if (enabled.has('linkedin')) {
+    console.log('\n' + '━'.repeat(45));
+    console.log('SOURCE — LinkedIn (scrape + score per query)');
+    console.log('━'.repeat(45));
+
+    for (const query of LINKEDIN_QUERIES) {
+      console.log(`\nSearching: "${query.keywords}" in ${query.location}`);
+      try {
+        const jobs = await scrapeLinkedIn(query.keywords, query.location, LINKEDIN_JOBS_PER_QUERY);
+        console.log(`  Got ${jobs.length} jobs`);
+        if (jobs.length > 0) {
+          const r = await dedupFilterScore(jobs, `LinkedIn "${query.keywords}"`, seenIds, seenKeys, seenUrls, existingIds);
+          stats.totalScraped += r.total;
+          stats.totalNew += r.deduped;
+          stats.totalFiltered += r.filtered;
+          stats.totalScored += r.scored;
+        }
+      } catch (err) {
+        console.error(`  Failed: ${(err as Error).message}`);
+      }
+    }
+
+    // Gmail alerts — scrape + score per alert for real-time results
+    try {
+      console.log('\nLinkedIn Job Alerts:');
+      const alertsFile = path.join(__dirname, '../data/alerts.json');
+      let alerts: { label: string; keywords: string; location: string }[] = [];
+      try {
+        const fs = await import('fs');
+        if (fs.existsSync(alertsFile)) {
+          alerts = JSON.parse(fs.readFileSync(alertsFile, 'utf-8'));
+        }
+      } catch { /* no alerts */ }
+
+      if (alerts.length > 0) {
+        for (const alert of alerts) {
+          console.log(`\n  Alert: "${alert.label}"`);
+          try {
+            const jobs = await scrapeLinkedIn(alert.keywords, alert.location, 50);
+            console.log(`  Got ${jobs.length} jobs`);
+            if (jobs.length > 0) {
+              const r = await dedupFilterScore(jobs, `Alert "${alert.label}"`, seenIds, seenKeys, seenUrls, existingIds);
+              stats.totalScraped += r.total;
+              stats.totalNew += r.deduped;
+              stats.totalFiltered += r.filtered;
+              stats.totalScored += r.scored;
+            }
+          } catch (err) {
+            console.error(`  Alert "${alert.label}" failed: ${(err as Error).message}`);
+          }
+        }
+      } else {
+        // Fallback to the combined function if no alerts.json
+        const alertJobs = await scrapeLinkedInAlerts(50);
+        console.log(`  Got ${alertJobs.length} jobs from alerts`);
+        if (alertJobs.length > 0) {
+          const r = await dedupFilterScore(alertJobs, 'LinkedIn Alerts', seenIds, seenKeys, seenUrls, existingIds);
+          stats.totalScraped += r.total;
+          stats.totalNew += r.deduped;
+          stats.totalFiltered += r.filtered;
+          stats.totalScored += r.scored;
+        }
+      }
+    } catch (err) {
+      console.error(`  Alerts failed: ${(err as Error).message}`);
+    }
+  }
+
+  // ── Source 3: Lever (score per company for real-time results) ──
+  if (enabled.has('lever')) {
+    console.log('\n' + '━'.repeat(45));
+    console.log('SOURCE — Lever (scrape + score per company)');
+    console.log('━'.repeat(45) + '\n');
+
+    const leverCompanies = TARGET_COMPANIES.filter((c) => c.ats === 'lever');
+
+    for (const company of leverCompanies) {
+      const jobs = await scrapeLever(company.slug, company.name);
+      if (jobs.length > 0) {
+        const r = await dedupFilterScore(jobs, company.name, seenIds, seenKeys, seenUrls, existingIds);
+        stats.totalScraped += r.total;
+        stats.totalNew += r.deduped;
+        stats.totalFiltered += r.filtered;
+        stats.totalScored += r.scored;
+      }
+    }
+  }
+
+  // ── Source 4: Indeed (if enabled) ──
+  if (enabled.has('indeed')) {
+    console.log('\n' + '━'.repeat(45));
+    console.log('SOURCE — Indeed (scrape + score)');
+    console.log('━'.repeat(45));
+
+    const indeedSeen = new Set<string>();
+    for (const query of INDEED_QUERIES) {
+      console.log(`\nSearching: "${query.keywords}" in ${query.location}`);
+      try {
+        const jobs = await scrapeIndeed(query.keywords, query.location, INDEED_JOBS_PER_QUERY);
+        const newJobs = jobs.filter((j) => { if (indeedSeen.has(j.id)) return false; indeedSeen.add(j.id); return true; });
+        console.log(`  Got ${jobs.length} jobs (${jobs.length - newJobs.length} cross-query dupes)`);
+        if (newJobs.length > 0) {
+          const r = await dedupFilterScore(newJobs, `Indeed "${query.keywords}"`, seenIds, seenKeys, seenUrls, existingIds);
+          stats.totalScraped += r.total;
+          stats.totalNew += r.deduped;
+          stats.totalFiltered += r.filtered;
+          stats.totalScored += r.scored;
+        }
+      } catch (err) {
+        console.error(`  Failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  // ── Final summary ──
   const allJobs = await loadJobs();
   const toApply = allJobs.filter((j) => j.status === 'to_apply');
   const rejected = allJobs.filter((j) => j.status === 'rejected');
@@ -343,13 +462,14 @@ async function main() {
     {} as Record<string, number>,
   );
 
-  console.log('━'.repeat(45));
+  console.log('\n' + '━'.repeat(45));
   console.log('FINAL SUMMARY');
   console.log('━'.repeat(45));
   console.log(`Total in tracker: ${allJobs.length}`);
-  console.log(`New this run:     ${uniqueNewJobs.length}`);
-  console.log(`  Fast-filtered:  ${filtered}`);
-  console.log(`  LLM-scored:     ${needsLLM.length}`);
+  console.log(`New this run:     ${stats.totalNew}`);
+  console.log(`  Scraped:        ${stats.totalScraped}`);
+  console.log(`  Fast-filtered:  ${stats.totalFiltered}`);
+  console.log(`  LLM-scored:     ${stats.totalScored}`);
   console.log(`To apply:         ${toApply.length}`);
   console.log(`Rejected:         ${rejected.length}`);
   console.log(`\nMatches by source:`);

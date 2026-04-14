@@ -6,6 +6,7 @@ import { ProfileModule } from './profile/profile.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { FormAnswersModule } from './form-answers/form-answers.module';
+import { ApplicationFieldsModule } from './application-fields/application-fields.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { FormAnswersModule } from './form-answers/form-answers.module';
     PipelineModule,
     AlertsModule,
     FormAnswersModule,
+    ApplicationFieldsModule,
   ],
 })
 export class AppModule {}

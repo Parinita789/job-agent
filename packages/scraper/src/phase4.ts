@@ -31,10 +31,41 @@ async function main() {
   console.log(`Platforms: ${allowedPlatforms.join(', ')} | Limit: ${limit === Infinity ? 'all' : limit}${specificJobIds ? ` | Jobs: ${specificJobIds.length} selected` : ''}`);
   console.log('==============================\n');
 
-  const jobs: ScoredJob[] = await loadExistingJobs();
+  // Only load specific jobs when IDs are provided (skip loading all 1600+ jobs)
+  let jobs: ScoredJob[];
+  if (specificJobIds) {
+    const { JobModel } = await import('./db');
+    const docs = await JobModel.find({ externalId: { $in: specificJobIds } }).lean();
+    const { default: _ } = await import('./db'); // ensure jobDocToScoredJob is available
+    jobs = docs.map((d: any) => ({
+      id: d.externalId,
+      title: d.title,
+      company: d.company,
+      url: d.url,
+      description: d.description || '',
+      source: d.source,
+      location: d.location || '',
+      salary_min: d.salary_min,
+      salary_max: d.salary_max,
+      posted_at: d.posted_at,
+      scraped_at: d.scraped_at,
+      fit_score: d.fit_score || 0,
+      apply: d.apply ?? false,
+      matched_skills: d.matched_skills || [],
+      missing_skills: d.missing_skills || [],
+      reason: d.reason || '',
+      status: d.status || 'to_apply',
+      deal_breaker: d.deal_breaker,
+      applied_at: d.applied_at,
+      applied_via: d.applied_via,
+    })) as ScoredJob[];
+    console.log(`Loaded ${jobs.length} specific jobs from DB`);
+  } else {
+    jobs = await loadExistingJobs();
+  }
 
   const allEligible = specificJobIds
-    ? jobs.filter((j) => specificJobIds.includes(j.id) && j.status === 'to_apply')
+    ? jobs.filter((j) => specificJobIds.includes(j.id) && ['to_apply', 'rejected'].includes(j.status))
     : jobs.filter((j) => j.fit_score >= 5 && j.status === 'to_apply');
 
   const linkedinJobs = allowedPlatforms.includes('linkedin') ? allEligible.filter((j) => j.source === 'linkedin') : [];
@@ -63,26 +94,11 @@ async function main() {
   toApply.forEach((j) => console.log(`  ${j.fit_score}/10 [${j.source}] ${j.title} @ ${j.company}`));
   console.log('');
 
-  // Pre-generate cover letters for all jobs before launching browser
-  const { CoverLetterModel } = await import('./db');
-  const { generateCoverLetter } = await import('./cover-letter/cover-letter');
-  console.log('Pre-generating cover letters...');
-  for (const job of toApply) {
-    const existing = await CoverLetterModel.findOne({ externalJobId: job.id }).lean().catch(() => null);
-    if (!existing) {
-      try {
-        const cl = await generateCoverLetter(job);
-        const { saveCoverLetter } = await import('./db');
-        await saveCoverLetter(job.id, cl);
-        console.log(`  ✓ ${job.company} — ${cl.length} chars`);
-      } catch {
-        console.log(`  ✗ ${job.company} — failed`);
-      }
-    }
-  }
-  console.log('');
+  // Load pre-scraped answers if available (from Prepare tab) — no scraping here
+  const { ApplicationFieldsModel } = await import('@job-agent/shared');
 
-  // Launch browser with comprehensive anti-detection
+  // Launch browser
+  console.log('Launching browser...');
   const browser = await chromium.launch({
     headless: false,
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -95,6 +111,37 @@ async function main() {
       '--start-maximized',
     ],
   });
+  console.log('  Browser ready\n');
+
+  // Exit cleanly when user manually closes the browser window
+  browser.on('disconnected', async () => {
+    console.log('\n  Browser closed by user. Exiting...');
+    await disconnectDatabase().catch(() => {});
+    process.exit(0);
+  });
+
+  // Only generate cover letters if they don't already exist (pre-scraped jobs already have them)
+  const { CoverLetterModel } = await import('./db');
+  const coverLetterPromise = (async () => {
+    for (const job of toApply) {
+      // Check pre-scraped data first (already has cover letter)
+      const preFilled = await ApplicationFieldsModel.findOne({ externalJobId: job.id }).lean().catch(() => null);
+      if ((preFilled as any)?.coverLetter) continue;
+      // Check cover letter collection
+      const existing = await CoverLetterModel.findOne({ externalJobId: job.id }).lean().catch(() => null);
+      if (existing) continue;
+      // Generate only if missing everywhere
+      try {
+        const { generateCoverLetter } = await import('./cover-letter/cover-letter');
+        const cl = await generateCoverLetter(job);
+        const { saveCoverLetter } = await import('./db');
+        await saveCoverLetter(job.id, cl);
+        console.log(`  ✓ Cover letter ready: ${job.company}`);
+      } catch {
+        console.log(`  ✗ Cover letter failed: ${job.company}`);
+      }
+    }
+  })();
 
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -150,12 +197,15 @@ async function main() {
     Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
   });
 
-  // Load saved sessions
-  const linkedinSessionFile = path.join(__dirname, '../data/linkedin-session.json');
-  if (fs.existsSync(linkedinSessionFile)) {
-    const cookies = JSON.parse(fs.readFileSync(linkedinSessionFile, 'utf-8'));
+  // Load saved sessions — use separate LinkedIn session for applying (your real account)
+  const linkedinApplySessionFile = path.join(__dirname, '../data/linkedin-session-apply.json');
+  const linkedinScrapeSessionFile = path.join(__dirname, '../data/linkedin-session.json');
+  if (fs.existsSync(linkedinApplySessionFile)) {
+    const cookies = JSON.parse(fs.readFileSync(linkedinApplySessionFile, 'utf-8'));
     await context.addCookies(cookies);
-    console.log('LinkedIn session loaded.');
+    console.log('LinkedIn session loaded (apply account).');
+  } else if (fs.existsSync(linkedinScrapeSessionFile)) {
+    console.log('⚠ Only scrape LinkedIn session found. Log into your real LinkedIn in the browser — it will be saved for future applies.');
   }
 
   const greenhouseSessionFile = path.join(__dirname, '../data/greenhouse-session.json');
@@ -175,6 +225,12 @@ async function main() {
   };
 
   for (let i = 0; i < toApply.length; i++) {
+    // Stop if page or browser was closed by user
+    if (page.isClosed() || !browser.isConnected()) {
+      console.log('\n  Browser/page closed. Stopping.');
+      break;
+    }
+
     const job = toApply[i];
     const label = `${job.title} @ ${job.company}`;
 
@@ -189,19 +245,28 @@ async function main() {
         ? await applyViaGreenhouse(page, job)
         : await applyViaEasyApply(page, job);
     } catch (err) {
-      console.log(`  ERROR: ${(err as Error).message}`);
-      result = { success: false, reason: (err as Error).message };
-      // Navigate to blank page to reset state for next job
+      const msg = (err as Error).message || '';
+      if (msg.includes('closed') || msg.includes('destroyed')) {
+        console.log('  Browser/page closed. Stopping.');
+        break;
+      }
+      console.log(`  ERROR: ${msg}`);
+      result = { success: false, reason: msg };
       await page.goto('about:blank').catch(() => {});
     }
 
     // Save session cookies after each job (captures login state)
+    const cookies = await context.cookies();
     if (job.source === 'greenhouse') {
-      const cookies = await context.cookies();
       const ghCookies = cookies.filter((c) => c.domain.includes('greenhouse'));
       if (ghCookies.length > 0) {
         fs.writeFileSync(greenhouseSessionFile, JSON.stringify(ghCookies, null, 2));
       }
+    }
+    // Save LinkedIn apply session (separate from scrape session)
+    const liCookies = cookies.filter((c) => c.domain.includes('linkedin'));
+    if (liCookies.length > 0) {
+      fs.writeFileSync(linkedinApplySessionFile, JSON.stringify(liCookies, null, 2));
     }
 
     if (result.success) {
@@ -212,6 +277,11 @@ async function main() {
       job.applied_at = new Date().toISOString();
       job.applied_via = 'auto';
       await saveJob(job);
+      // Mark applicationFields as applied so it disappears from Prepare tab
+      await ApplicationFieldsModel.findOneAndUpdate(
+        { externalJobId: job.id },
+        { $set: { status: 'applied' } },
+      ).catch(() => {});
       console.log(`  ✓ Status updated to 'applied' in database`);
     } else if (result.reason.includes('No Easy Apply') || result.reason.includes('No application form')) {
       console.log(`  SKIPPED: ${result.reason}`);
@@ -229,15 +299,17 @@ async function main() {
       results.failed.push({ job: label, reason: result.reason });
     }
 
-    // Delay between jobs — shorter for skips, longer for actual applications
+    // Delay between jobs — shorter when pre-filled, longer for manual fills
     if (i < toApply.length - 1) {
       const wasApplied = result.success;
-      const delay = wasApplied ? 5000 + Math.random() * 5000 : 1000 + Math.random() * 2000;
+      const delay = wasApplied ? 2000 + Math.random() * 2000 : 500 + Math.random() * 1000;
       console.log(`\n  Waiting ${Math.round(delay / 1000)}s before next job...`);
       await sleep(delay);
     }
   }
 
+  // Wait for any remaining cover letter generation
+  await coverLetterPromise.catch(() => {});
   await browser.close();
 
   console.log('\n==============================');

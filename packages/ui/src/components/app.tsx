@@ -10,14 +10,16 @@ import { ProfileEditor } from './profile-editor';
 import { FormAnswers } from './form-answers';
 import { CoverLettersPage, type CoverLetterJob } from './cover-letters';
 import { PendingQuestion } from './pending-question';
+import { PrepareReview } from './prepare-review';
 
-type Tab = 'queue' | 'applied' | 'accepted' | 'rejected' | 'cover-letters';
+type Tab = 'queue' | 'applied' | 'accepted' | 'rejected' | 'cover-letters' | 'prepare';
 type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('queue');
   const [jobs, setJobs] = useState<ScoredJob[]>([]);
   const [coverLetterJobs, setCoverLetterJobs] = useState<CoverLetterJob[]>([]);
+  const [prepareJobs, setPrepareJobs] = useState<any[]>([]);
   const [selectedJob, setSelectedJob] = useState<ScoredJob | null>(null);
   const [commandPanelOpen, setCommandPanelOpen] = useState(false);
   const [keywordManagerOpen, setKeywordManagerOpen] = useState(false);
@@ -50,12 +52,22 @@ export function App() {
     }
   }, []);
 
-  useEffect(() => { fetchJobs(); fetchCoverLetters(); }, [fetchJobs, fetchCoverLetters]);
+  const fetchPrepareJobs = useCallback(async () => {
+    try {
+      const { data } = await axios.get('/api/application-fields');
+      setPrepareJobs(data);
+    } catch {
+      // ignore
+    }
+  }, []);
 
-  // Refresh cover letters when switching to that tab
+  useEffect(() => { fetchJobs(); fetchCoverLetters(); fetchPrepareJobs(); }, [fetchJobs, fetchCoverLetters, fetchPrepareJobs]);
+
+  // Refresh cover letters / prepare when switching to those tabs
   useEffect(() => {
     if (activeTab === 'cover-letters') fetchCoverLetters();
-  }, [activeTab, fetchCoverLetters]);
+    if (activeTab === 'prepare') fetchPrepareJobs();
+  }, [activeTab, fetchCoverLetters, fetchPrepareJobs]);
 
   const handleClosePanel = useCallback(() => {
     setCommandPanelOpen(false);
@@ -67,8 +79,9 @@ export function App() {
     await fetchCoverLetters();
   }, [fetchJobs, fetchCoverLetters]);
 
+  // Poll for new jobs every 5 seconds — keeps UI in sync with real-time scoring
   useEffect(() => {
-    const interval = setInterval(fetchJobs, 30000);
+    const interval = setInterval(fetchJobs, 5000);
     return () => clearInterval(interval);
   }, [fetchJobs]);
 
@@ -105,8 +118,10 @@ export function App() {
   const handleAutoApply = useCallback(async (jobIds: string[]) => {
     try {
       await axios.post('/api/pipeline/auto-apply', { jobIds });
-    } catch (err) {
-      console.error('Failed to start auto-apply:', err);
+    } catch (err: any) {
+      const msg = err.response?.data?.message || 'Failed to start auto-apply';
+      alert(msg);
+      console.error('Failed to start auto-apply:', msg);
     }
   }, []);
 
@@ -138,7 +153,7 @@ export function App() {
   if (loading) {
     return (
       <div className="container">
-        <div className="app-header"><h1>Job Tracker</h1></div>
+        <div className="app-header"><h1>JobPilot</h1></div>
         <div className="empty-state"><p>Loading...</p></div>
       </div>
     );
@@ -147,7 +162,7 @@ export function App() {
   return (
     <div className="container">
       <div className="app-header">
-        <h1>Job Tracker</h1>
+        <h1>JobPilot</h1>
         <div className="hamburger-wrapper">
           <button className="hamburger-btn" onClick={() => setMenuOpen(!menuOpen)}>
             <span /><span /><span />
@@ -163,7 +178,7 @@ export function App() {
                   Keywords
                 </button>
                 <button onClick={() => { setFormAnswersOpen(true); setMenuOpen(false); }}>
-                  Form Answers
+                  Saved Rules
                 </button>
                 <button onClick={() => { setCommandPanelOpen(true); setMenuOpen(false); }}>
                   Pipeline
@@ -176,12 +191,12 @@ export function App() {
       <TabBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        counts={{ queue: queue.length, applied: applied.length, accepted: accepted.length, rejected: rejected.length, coverLetters: coverLetterJobs.length }}
+        counts={{ queue: queue.length, applied: applied.length, accepted: accepted.length, rejected: rejected.length, coverLetters: coverLetterJobs.length, prepare: prepareJobs.filter((p: any) => p.status !== 'applied').length }}
         onOpenCommands={() => setCommandPanelOpen(true)}
         onOpenKeywords={() => setKeywordManagerOpen(true)}
       />
 
-      {activeTab !== 'cover-letters' && (
+      {activeTab !== 'cover-letters' && activeTab !== 'prepare' && (
         <>
           <div className="filter-row">
             <div className="search-filter">
@@ -226,6 +241,15 @@ export function App() {
           </div>
           <JobTable jobs={tabJobs} activeTab={activeTab} selectMode={autoApplyMode} onSelectJob={setSelectedJob} onDismissJob={handleDismissJob} onMarkApplied={handleMarkApplied} onUpdateStatus={handleUpdateStatus} onAutoApply={(ids) => { handleAutoApply(ids); setAutoApplyMode(false); }} onGenerateCoverLetters={(ids) => { handleGenerateCoverLetters(ids); setAutoApplyMode(false); }} onCancelSelect={() => setAutoApplyMode(false)} />
         </>
+      )}
+
+      {activeTab === 'prepare' && (
+        <PrepareReview jobs={prepareJobs} onRefresh={fetchPrepareJobs} onAutoApply={handleAutoApply} onDismissJob={async (jobId) => {
+          try {
+            await axios.patch(`/api/jobs/${jobId}/status`, { status: 'rejected', reason: 'Removed from prepare list' });
+            fetchJobs();
+          } catch { /* ignore */ }
+        }} />
       )}
 
       {activeTab === 'cover-letters' && (

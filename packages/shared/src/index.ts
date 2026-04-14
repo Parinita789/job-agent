@@ -4,5 +4,6 @@ export * from './schemas/cover-letter.schema';
 export * from './schemas/question-answer.schema';
 export * from './schemas/user.schema';
 export * from './schemas/profile-answer.schema';
+export * from './schemas/application-fields.schema';
 export * from './db/connection';
 export * from './llm/clients';

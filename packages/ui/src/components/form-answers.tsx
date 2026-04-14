@@ -20,10 +20,11 @@ interface JobQALog {
 interface FormAnswersProps {
   isOpen: boolean;
   onClose: () => void;
+  defaultTab?: 'rules' | 'logs';
 }
 
-export function FormAnswers({ isOpen, onClose }: FormAnswersProps) {
-  const [tab, setTab] = useState<'rules' | 'logs'>('rules');
+export function FormAnswers({ isOpen, onClose, defaultTab }: FormAnswersProps) {
+  const [tab, setTab] = useState<'rules' | 'logs'>(defaultTab || 'rules');
   const [rules, setRules] = useState<Record<string, string>>({});
   const [logs, setLogs] = useState<JobQALog[]>([]);
   const [saving, setSaving] = useState(false);
@@ -149,8 +150,8 @@ export function FormAnswers({ isOpen, onClose }: FormAnswersProps) {
               {logs.length === 0 ? (
                 <div className="empty-state"><p>No form answers logged yet. Run Auto Apply to see answers here.</p></div>
               ) : (
-                logs.map((job) => (
-                  <div key={job.jobId} className="fa-log-job">
+                logs.map((job, idx) => (
+                  <div key={`${job.jobId}-${idx}`} className="fa-log-job">
                     <div
                       className="fa-log-job-header"
                       onClick={() => setExpandedJob(expandedJob === job.jobId ? null : job.jobId)}
