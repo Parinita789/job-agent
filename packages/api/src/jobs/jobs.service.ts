@@ -81,9 +81,13 @@ export class JobsService {
     const scraperDir = path.resolve(__dirname, '../../../scraper');
 
     return new Promise((resolve, reject) => {
+      // Validate job ID to prevent injection
+      if (!/^[a-zA-Z0-9_\-]+$/.test(id)) {
+        reject(new Error('Invalid job ID format'));
+        return;
+      }
       const child = spawn('npx', ['tsx', 'src/generate-one-cover-letter.ts', id], {
         cwd: scraperDir,
-        shell: true,
         env: { ...process.env, FORCE_COLOR: '0' },
       });
 
@@ -103,5 +107,29 @@ export class JobsService {
       child.on('error', reject);
       setTimeout(() => { child.kill(); reject(new Error('Cover letter generation timed out')); }, 60000);
     });
+  }
+
+  async addManualJob(data: { title: string; company: string; url?: string; source?: string }): Promise<any> {
+    const id = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const job = await JobModel.create({
+      externalId: id,
+      title: data.title,
+      company: data.company,
+      url: data.url || '',
+      description: '',
+      source: data.source || 'linkedin',
+      location: '',
+      fit_score: 7,
+      apply: true,
+      matched_skills: [],
+      missing_skills: [],
+      reason: 'Manually added',
+      status: 'applied',
+      applied_at: new Date(),
+      applied_via: 'manual',
+      scraped_at: new Date(),
+    });
+    const { _id, __v, ...rest } = job.toObject();
+    return { ...rest, id: job.externalId };
   }
 }

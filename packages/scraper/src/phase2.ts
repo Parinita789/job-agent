@@ -6,6 +6,7 @@ import { scrapeLinkedInAlerts } from './scraper/linkedin-alerts';
 import { scrapeGreenhouse } from './scraper/greenhouse';
 import { scrapeLever } from './scraper/lever';
 import { scrapeIndeed } from './scraper/indeed';
+import { scrapeAshby } from './scraper/ashby';
 import { checkDealBreakers } from './deal-breakers';
 import { scoreFitWithLLM } from './scorer/llm-scorer';
 import { TARGET_COMPANIES } from './scraper/company-list';
@@ -114,8 +115,8 @@ async function scoreBatch(
   return Promise.all(promises);
 }
 
-type Source = 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
-const ALL_SOURCES: Source[] = ['linkedin', 'greenhouse', 'lever'];
+type Source = 'linkedin' | 'greenhouse' | 'lever' | 'indeed' | 'ashby';
+const ALL_SOURCES: Source[] = ['ashby', 'greenhouse', 'linkedin', 'lever'];
 
 async function scrapeAllSources(sources: Source[] = ALL_SOURCES): Promise<JobListing[]> {
   const all: JobListing[] = [];
@@ -314,7 +315,27 @@ async function main() {
   const enabled = new Set(sources);
   const stats = { totalScraped: 0, totalNew: 0, totalFiltered: 0, totalScored: 0 };
 
-  // ── Source 1: Greenhouse (API-based, score per company for real-time results) ──
+  // ── Source: Ashby (API-based, score per company — jobs appear before LinkedIn) ──
+  if (enabled.has('ashby')) {
+    console.log('━'.repeat(45));
+    console.log('SOURCE — Ashby (direct career page API)');
+    console.log('━'.repeat(45) + '\n');
+
+    const ashbyCompanies = TARGET_COMPANIES.filter((c) => c.ats === 'ashby');
+
+    for (const company of ashbyCompanies) {
+      const jobs = await scrapeAshby(company.slug, company.name);
+      if (jobs.length > 0) {
+        const r = await dedupFilterScore(jobs, company.name, seenIds, seenKeys, seenUrls, existingIds);
+        stats.totalScraped += r.total;
+        stats.totalNew += r.deduped;
+        stats.totalFiltered += r.filtered;
+        stats.totalScored += r.scored;
+      }
+    }
+  }
+
+  // ── Source: Greenhouse (API-based, score per company for real-time results) ──
   if (enabled.has('greenhouse')) {
     console.log('━'.repeat(45));
     console.log('SOURCE — Greenhouse (scrape + score per company)');

@@ -29,4 +29,9 @@ export class JobsController {
   async generateCoverLetter(@Param('id') id: string) {
     return this.jobsService.generateCoverLetter(id);
   }
+
+  @Post('manual')
+  async addManualJob(@Body() body: { title: string; company: string; url?: string; source?: string }) {
+    return this.jobsService.addManualJob(body);
+  }
 }

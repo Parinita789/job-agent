@@ -273,7 +273,6 @@ export class PipelineService {
     return new Promise((resolve, reject) => {
       const child = spawn(cmd, args, {
         cwd,
-        shell: true,
         env: { ...process.env, FORCE_COLOR: '0' },
       });
 

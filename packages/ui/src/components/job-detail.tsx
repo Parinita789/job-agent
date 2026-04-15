@@ -1,11 +1,19 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import DOMPurify from 'dompurify';
 import type { ScoredJob } from '../types';
 
 function decodeHtml(html: string): string {
   const txt = document.createElement('textarea');
   txt.innerHTML = html;
   return txt.value;
+}
+
+function sanitizeHtml(html: string): string {
+  return DOMPurify.sanitize(decodeHtml(html), {
+    ALLOWED_TAGS: ['p', 'div', 'span', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'b', 'i', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'tr', 'td', 'th', 'thead', 'tbody'],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
+  });
 }
 
 interface JobDetailProps {
@@ -141,7 +149,7 @@ export function JobDetail({ job, onClose, onJobUpdate }: JobDetailProps) {
           {job.description.includes('&lt;') || job.description.includes('<p') || job.description.includes('<div') ? (
             <div
               className="job-description-html"
-              dangerouslySetInnerHTML={{ __html: decodeHtml(job.description) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(job.description) }}
             />
           ) : (
             <pre>{job.description}</pre>

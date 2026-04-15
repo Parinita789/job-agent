@@ -12,7 +12,7 @@ const jobSchema = new mongoose.Schema(
     salary_max:        Number,
     description:       String,
     url:               String,
-    source:            { type: String, enum: ['linkedin', 'greenhouse', 'lever', 'indeed'] },
+    source:            { type: String, enum: ['linkedin', 'greenhouse', 'lever', 'indeed', 'ashby', 'manual'] },
     scraped_at:        Date,
     posted_at:         Date,
     fit_score:         Number,

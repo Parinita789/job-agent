@@ -12,8 +12,8 @@ import { CoverLettersPage, type CoverLetterJob } from './cover-letters';
 import { PendingQuestion } from './pending-question';
 import { PrepareReview } from './prepare-review';
 
-type Tab = 'queue' | 'applied' | 'accepted' | 'rejected' | 'cover-letters' | 'prepare';
-type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
+type Tab = 'queue' | 'applied' | 'accepted' | 'declined' | 'rejected' | 'cover-letters' | 'prepare';
+type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed' | 'ashby';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('queue');
@@ -31,6 +31,9 @@ export function App() {
   const [autoApplyMode, setAutoApplyMode] = useState(false);
   const [scoreFilter, setScoreFilter] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [newOnlyFilter, setNewOnlyFilter] = useState(false);
+  const [addJobOpen, setAddJobOpen] = useState(false);
+  const [newJob, setNewJob] = useState({ title: '', company: '', url: '' });
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -135,19 +138,22 @@ export function App() {
 
   const byPlatform = platformFilter === 'all' ? jobs : jobs.filter((j) => j.source === platformFilter);
   const byScore = scoreFilter > 0 ? byPlatform.filter((j) => j.fit_score === scoreFilter) : byPlatform;
+  const byNew = newOnlyFilter ? byScore.filter((j) => Date.now() - new Date(j.scraped_at).getTime() < 86400000) : byScore;
   const filtered = searchQuery
-    ? byScore.filter((j) =>
+    ? byNew.filter((j) =>
         j.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
         j.title.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : byScore;
+    : byNew;
   const queue = filtered.filter((j) => j.status === 'to_apply');
   const applied = filtered.filter((j) => ['applied', 'interviewing', 'no_response'].includes(j.status));
   const accepted = filtered.filter((j) => j.status === 'accepted');
-  const rejected = filtered.filter((j) => ['rejected', 'declined'].includes(j.status));
+  const declined = filtered.filter((j) => j.status === 'declined');
+  const rejected = filtered.filter((j) => j.status === 'rejected');
   const tabJobs = activeTab === 'queue' ? queue
     : activeTab === 'applied' ? applied
     : activeTab === 'accepted' ? accepted
+    : activeTab === 'declined' ? declined
     : rejected;
 
   if (loading) {
@@ -191,7 +197,7 @@ export function App() {
       <TabBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        counts={{ queue: queue.length, applied: applied.length, accepted: accepted.length, rejected: rejected.length, coverLetters: coverLetterJobs.length, prepare: prepareJobs.filter((p: any) => p.status !== 'applied').length }}
+        counts={{ queue: queue.length, applied: applied.length, accepted: accepted.length, declined: declined.length, rejected: rejected.length, coverLetters: coverLetterJobs.length, prepare: prepareJobs.filter((p: any) => p.status !== 'applied').length }}
         onOpenCommands={() => setCommandPanelOpen(true)}
         onOpenKeywords={() => setKeywordManagerOpen(true)}
       />
@@ -211,7 +217,7 @@ export function App() {
               )}
             </div>
             <div className="platform-filter">
-              {(['all', 'linkedin', 'greenhouse', 'lever', 'indeed'] as PlatformFilter[]).map((p) => (
+              {(['all', 'linkedin', 'greenhouse', 'lever', 'indeed', 'ashby'] as PlatformFilter[]).map((p) => (
                 <button
                   key={p}
                   className={`filter-btn ${platformFilter === p ? 'active' : ''}`}
@@ -221,6 +227,13 @@ export function App() {
                 </button>
               ))}
             </div>
+            <button
+              className={`filter-btn ${newOnlyFilter ? 'active' : ''}`}
+              onClick={() => setNewOnlyFilter(!newOnlyFilter)}
+              style={{ fontWeight: newOnlyFilter ? 600 : 400 }}
+            >
+              New (24h)
+            </button>
             <div className="score-filter">
               <span className="score-filter-label">Score:</span>
               {[0, 5, 6, 7, 8, 9].map((s) => (
@@ -236,6 +249,11 @@ export function App() {
             {activeTab === 'queue' && !autoApplyMode && (
               <button className="select-to-apply-btn" onClick={() => setAutoApplyMode(true)}>
                 Select to Auto Apply
+              </button>
+            )}
+            {activeTab === 'applied' && (
+              <button className="select-to-apply-btn" onClick={() => setAddJobOpen(true)}>
+                + Add Job
               </button>
             )}
           </div>
@@ -284,6 +302,53 @@ export function App() {
         onClose={() => setFormAnswersOpen(false)}
       />
       <PendingQuestion />
+      {addJobOpen && (
+        <div className="modal-overlay" onClick={() => setAddJobOpen(false)}>
+          <div className="add-job-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Add External Application</h3>
+            <p className="add-job-hint">Track a job you applied to outside this app.</p>
+            <div className="add-job-form">
+              <input
+                placeholder="Job Title *"
+                value={newJob.title}
+                onChange={(e) => setNewJob({ ...newJob, title: e.target.value })}
+                autoFocus
+              />
+              <input
+                placeholder="Company *"
+                value={newJob.company}
+                onChange={(e) => setNewJob({ ...newJob, company: e.target.value })}
+              />
+              <input
+                placeholder="Job URL (optional)"
+                value={newJob.url}
+                onChange={(e) => setNewJob({ ...newJob, url: e.target.value })}
+              />
+              <div className="add-job-actions">
+                <button className="prepare-cancel-btn" onClick={() => { setAddJobOpen(false); setNewJob({ title: '', company: '', url: '' }); }}>
+                  Cancel
+                </button>
+                <button
+                  className="auto-apply-btn"
+                  disabled={!newJob.title.trim() || !newJob.company.trim()}
+                  onClick={async () => {
+                    try {
+                      await axios.post('/api/jobs/manual', newJob);
+                      setAddJobOpen(false);
+                      setNewJob({ title: '', company: '', url: '' });
+                      fetchJobs();
+                    } catch (err) {
+                      console.error('Failed to add job:', err);
+                    }
+                  }}
+                >
+                  Add to Applied
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

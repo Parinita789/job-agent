@@ -1,6 +1,6 @@
 export interface CompanyConfig {
   name: string;
-  ats: 'greenhouse' | 'lever';
+  ats: 'greenhouse' | 'lever' | 'ashby';
   slug: string;
   domain: string;
 }
@@ -90,4 +90,16 @@ export const TARGET_COMPANIES: CompanyConfig[] = [
   { name: 'Databricks', ats: 'greenhouse', slug: 'databricks', domain: 'Data' },
   { name: 'Fivetran', ats: 'greenhouse', slug: 'fivetran', domain: 'Data' },
   { name: 'Starburst', ats: 'greenhouse', slug: 'starburst', domain: 'Data' },
+
+  // ── Ashby Companies (direct career page API — jobs appear before LinkedIn) ──
+  { name: 'Ramp', ats: 'ashby', slug: 'ramp', domain: 'Fintech' },
+  { name: 'Notion', ats: 'ashby', slug: 'notion', domain: 'SaaS' },
+  { name: 'Plaid', ats: 'ashby', slug: 'plaid', domain: 'Fintech' },
+  { name: 'Linear', ats: 'ashby', slug: 'linear', domain: 'Developer Tools' },
+  { name: 'Vanta', ats: 'ashby', slug: 'vanta', domain: 'Security' },
+  { name: 'Anyscale', ats: 'ashby', slug: 'anyscale', domain: 'AI/ML' },
+  { name: 'Watershed', ats: 'ashby', slug: 'watershed', domain: 'Climate' },
+  { name: 'Persona', ats: 'ashby', slug: 'persona', domain: 'Security' },
+  { name: 'Stytch', ats: 'ashby', slug: 'stytch', domain: 'Security' },
+  { name: 'Hightouch', ats: 'ashby', slug: 'hightouch', domain: 'Data' },
 ];

@@ -1,6 +1,6 @@
 export type JobStatus = 'to_apply' | 'applied' | 'rejected' | 'no_response' | 'interviewing' | 'accepted' | 'declined';
 
-export type JobSource = 'linkedin' | 'greenhouse' | 'lever' | 'indeed';
+export type JobSource = 'linkedin' | 'greenhouse' | 'lever' | 'indeed' | 'ashby';
 
 export interface JobListing {
   id: string;
