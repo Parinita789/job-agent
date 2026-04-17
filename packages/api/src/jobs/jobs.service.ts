@@ -42,6 +42,13 @@ export class JobsService {
     ).lean();
 
     if (!job) throw new NotFoundException(`Job ${id} not found`);
+
+    // Sync applicationFields — remove from Prepare tab when job status changes
+    if (['applied', 'declined', 'rejected'].includes(status)) {
+      const { ApplicationFieldsModel } = await import('@job-agent/shared');
+      await ApplicationFieldsModel.deleteOne({ externalJobId: id }).catch(() => {});
+    }
+
     const { _id, __v, ...rest } = job as any;
     return { ...rest, id: (job as any).externalId };
   }

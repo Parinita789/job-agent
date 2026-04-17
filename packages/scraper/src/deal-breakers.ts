@@ -19,8 +19,9 @@ export function checkDealBreakers(job: JobListing): { rejected: boolean; reason?
     };
   }
 
-  // Rule 2 — employment type
-  if (!profile.preferences.employment_type.includes(job.employment_type)) {
+  // Rule 2 — employment type (case-insensitive)
+  const preferredTypes = profile.preferences.employment_type.map((t: string) => t.toLowerCase());
+  if (!preferredTypes.includes((job.employment_type || '').toLowerCase())) {
     return {
       rejected: true,
       reason: `Employment type "${job.employment_type}" not preferred`,

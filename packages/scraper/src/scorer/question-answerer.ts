@@ -71,8 +71,14 @@ async function matchStructured(question: string): Promise<string | null> {
   _rules = null;
   const q = normalizeQuestion(question);
   const rules = await getRules();
-  for (const [keyword, answer] of Object.entries(rules)) {
-    if (q.includes(normalizeQuestion(keyword))) return answer;
+  // Prefer longer keywords (more specific) first to avoid "city" matching before "current city".
+  const entries = Object.entries(rules).sort((a, b) => b[0].length - a[0].length);
+  for (const [keyword, answer] of entries) {
+    const k = normalizeQuestion(keyword);
+    if (!k) continue;
+    // Word-boundary match — prevents "city" matching inside "ethnicity", "state" inside "States".
+    const re = new RegExp(`\\b${k.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`);
+    if (re.test(q)) return answer;
   }
   return null;
 }
@@ -134,6 +140,11 @@ Reply with ONLY the exact text of the best matching option. Nothing else.
     const answer = await askLLM(prompt);
     await logQA({ question, type, options, answer, source: 'llm' });
     return answer;
+  }
+
+  // Select/radio without options — no LLM guesswork; let caller fall back to profile/skip
+  if (type === 'select' || type === 'radio') {
+    return '';
   }
 
   // open-ended textarea

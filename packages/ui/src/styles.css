@@ -3168,3 +3168,72 @@ h1 {
   height: 16px;
   cursor: pointer;
 }
+
+/* ── Add Job Modal ──────────────────────────────────────────────── */
+
+.add-job-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 420px;
+  box-shadow: var(--shadow-lg);
+}
+
+.add-job-modal h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.add-job-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.add-job-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.add-job-form input {
+  padding: 8px 12px;
+  font-size: 14px;
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+
+.add-job-form input:focus {
+  border-color: var(--accent);
+}
+
+.add-job-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.prepare-jd-link {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-glow);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  text-decoration: none;
+  vertical-align: middle;
+}
+
+.prepare-jd-link:hover {
+  background: var(--accent);
+  color: white;
+}

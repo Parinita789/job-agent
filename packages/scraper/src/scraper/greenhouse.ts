@@ -55,8 +55,6 @@ function isRelevantRole(title: string, description: string, location: string): b
     'platform engineer',
     'fullstack',
     'full stack',
-    'staff engineer',
-    'principal engineer',
     'senior engineer',
     'senior developer',
     'engineer ii',

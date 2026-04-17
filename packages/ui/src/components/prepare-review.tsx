@@ -60,7 +60,7 @@ export function PrepareReview({ jobs, onRefresh, onAutoApply, onDismissJob }: Pr
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
 
-  const activeJobs = jobs.filter((j) => j.status !== 'applied');
+  const activeJobs = jobs.filter((j) => !['applied', 'declined', 'rejected'].includes(j.status));
 
   const toggleExpand = useCallback((jobId: string) => {
     setExpandedJob((prev) => (prev === jobId ? null : jobId));
@@ -224,7 +224,21 @@ export function PrepareReview({ jobs, onRefresh, onAutoApply, onDismissJob }: Pr
                     <span className="score high">7+</span>
                   </td>
                   <td>{job.company}</td>
-                  <td>{job.title}</td>
+                  <td>
+                    {job.title}
+                    {job.url && (
+                      <a
+                        href={job.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="prepare-jd-link"
+                        onClick={(e) => e.stopPropagation()}
+                        title="View job description"
+                      >
+                        JD
+                      </a>
+                    )}
+                  </td>
                   <td>{job.fields.length}</td>
                   <td>
                     {job.unknownCount > 0 ? (

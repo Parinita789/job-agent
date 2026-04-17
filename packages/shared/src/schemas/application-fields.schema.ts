@@ -18,7 +18,7 @@ const applicationFieldsSchema = new mongoose.Schema(
     externalJobId: { type: String, required: true, unique: true, index: true },
     title: { type: String, required: true },
     company: { type: String, required: true },
-    source: { type: String, enum: ['linkedin', 'greenhouse', 'lever', 'indeed'] },
+    source: { type: String, enum: ['linkedin', 'greenhouse', 'lever', 'indeed', 'ashby', 'manual'] },
     url: String,
     status: {
       type: String,

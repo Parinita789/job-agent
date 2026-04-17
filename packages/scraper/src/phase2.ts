@@ -27,7 +27,7 @@ const LINKEDIN_QUERIES = [
   // Core — these produce the most unique, relevant results
   { keywords: 'Senior Backend Engineer', location: 'United States' },
   { keywords: 'Senior Software Engineer Node.js', location: 'United States' },
-  { keywords: 'Staff Backend Engineer', location: 'United States' },
+  { keywords: 'Backend Engineer Team Lead', location: 'United States' },
   { keywords: 'Software Engineer TypeScript', location: 'United States' },
   // Platform / Product
   { keywords: 'Software Engineer Platform Backend', location: 'United States' },
@@ -63,6 +63,7 @@ function quickReject(job: JobListing): string | null {
     'embedded', 'firmware', 'hardware', 'mechanical',
     'data analyst', 'analytics engineer', 'qa engineer', 'sdet',
     'test engineer', 'intern ', 'junior',
+    'principal', 'staff ',
   ];
   for (const k of titleRejects) {
     if (t.includes(k)) return `Title exclude: ${k}`;

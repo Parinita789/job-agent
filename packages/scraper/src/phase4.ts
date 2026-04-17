@@ -18,7 +18,7 @@ async function main() {
   const platformsArg = process.argv.find((a) => a.startsWith('--platforms='));
   const allowedPlatforms = platformsArg
     ? platformsArg.split('=')[1].split(',')
-    : ['linkedin', 'greenhouse'];
+    : ['linkedin', 'greenhouse', 'ashby'];
 
   const limitArg = process.argv.find((a) => a.startsWith('--limit='));
   const limit = limitArg ? parseInt(limitArg.split('=')[1], 10) : Infinity;
@@ -70,6 +70,7 @@ async function main() {
 
   const linkedinJobs = allowedPlatforms.includes('linkedin') ? allEligible.filter((j) => j.source === 'linkedin') : [];
   const greenhouseJobs = allowedPlatforms.includes('greenhouse') ? allEligible.filter((j) => j.source === 'greenhouse') : [];
+  const ashbyJobs = allowedPlatforms.includes('ashby') ? allEligible.filter((j) => j.source === 'ashby') : [];
   const manualApply = allEligible.filter((j) => !allowedPlatforms.includes(j.source));
 
   if (manualApply.length > 0) {
@@ -80,8 +81,8 @@ async function main() {
     console.log('');
   }
 
-  // Greenhouse first (higher success rate), then LinkedIn
-  const toApply = [...greenhouseJobs, ...linkedinJobs].slice(0, limit);
+  // Ashby + Greenhouse first (direct career page), then LinkedIn
+  const toApply = [...ashbyJobs, ...greenhouseJobs, ...linkedinJobs].slice(0, limit);
 
   if (toApply.length === 0) {
     console.log('No eligible jobs with status "to_apply".');
@@ -89,8 +90,9 @@ async function main() {
     return;
   }
 
-  console.log(`LinkedIn Easy Apply: ${linkedinJobs.length} jobs`);
-  console.log(`Greenhouse Apply:    ${greenhouseJobs.length} jobs\n`);
+  console.log(`Ashby Apply:         ${ashbyJobs.length} jobs`);
+  console.log(`Greenhouse Apply:    ${greenhouseJobs.length} jobs`);
+  console.log(`LinkedIn Easy Apply: ${linkedinJobs.length} jobs\n`);
   toApply.forEach((j) => console.log(`  ${j.fit_score}/10 [${j.source}] ${j.title} @ ${j.company}`));
   console.log('');
 
@@ -241,7 +243,7 @@ async function main() {
     // Same tab, sequential — more human-like
     let result: any;
     try {
-      result = job.source === 'greenhouse'
+      result = (job.source === 'greenhouse' || job.source === 'ashby')
         ? await applyViaGreenhouse(page, job)
         : await applyViaEasyApply(page, job);
     } catch (err) {

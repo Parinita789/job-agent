@@ -30,7 +30,7 @@ export type ApplicationResult =
 async function getFieldLabel(element: any, page: Page): Promise<string> {
   // 1. Try aria-label (Greenhouse sets this reliably)
   const ariaLabel = await element.getAttribute('aria-label').catch(() => '');
-  if (ariaLabel && ariaLabel.length < 100) return ariaLabel;
+  if (ariaLabel && ariaLabel.length < 200) return ariaLabel;
 
   // 2. Try associated label via id
   const id = await element.getAttribute('id').catch(() => '');
@@ -43,17 +43,52 @@ async function getFieldLabel(element: any, page: Page): Promise<string> {
         return clone.textContent?.replace(/\*/g, '').trim() ?? '';
       })
       .catch(() => '');
-    if (label && label.length > 0 && label.length < 100) return label;
+    if (label && label.length > 0 && label.length < 300) return label;
+  }
 
-    // 3. Use id as readable label: "first_name" → "First Name"
-    const readable = id
-      .replace(/^question_\d+$/, '') // skip generic question IDs
-      .replace(/[_\-]/g, ' ')
-      .trim();
+  // 3. Walk up to the field wrapper and find a nearby label (handles Greenhouse custom questions)
+  const wrapperLabel = await element.evaluate((el: HTMLElement) => {
+    let node: Element | null = el;
+    for (let i = 0; i < 8 && node; i++) {
+      node = node.parentElement;
+      if (!node) break;
+      // Check wrapper-specific classes
+      const classList = (node.className && typeof node.className === 'string') ? node.className : '';
+      if (/field|Field|question|Question/.test(classList) || node.tagName === 'FIELDSET') {
+        // Find label inside the wrapper that isn't inside an input wrapper
+        const legend = node.querySelector('legend');
+        if (legend) {
+          const txt = (legend.textContent || '').replace(/\*/g, '').trim();
+          if (txt) return txt;
+        }
+        const labels = node.querySelectorAll('label');
+        for (const label of Array.from(labels)) {
+          if ((label as HTMLElement).contains(el)) continue; // skip self-containing labels
+          const clone = label.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('span, abbr, small, svg, button, input, textarea, select').forEach((n) => n.remove());
+          const txt = clone.textContent?.replace(/\*/g, '').trim() || '';
+          if (txt && txt.length < 300) return txt;
+        }
+        // Check if the wrapper itself has a direct text child (question text)
+        for (const child of Array.from(node.children)) {
+          if (/label|heading|title/i.test(child.className || '') || /^H[1-6]$/.test(child.tagName)) {
+            const txt = (child.textContent || '').replace(/\*/g, '').trim();
+            if (txt && txt.length < 300) return txt;
+          }
+        }
+      }
+    }
+    return '';
+  }).catch(() => '');
+  if (wrapperLabel) return wrapperLabel;
+
+  // 4. Fall back to id as readable label (skipping generic question IDs)
+  if (id && !/^question_\d+$/.test(id) && !/^\d+$/.test(id)) {
+    const readable = id.replace(/[_\-]/g, ' ').trim();
     if (readable) return readable;
   }
 
-  // 4. Try placeholder
+  // 5. Try placeholder
   const placeholder = await element.getAttribute('placeholder').catch(() => '');
   if (placeholder && placeholder.length < 100) return placeholder;
 
@@ -516,23 +551,24 @@ function getDirectAnswer(
     }
   }
 
+  // Location — require word boundaries on short keywords to avoid matching inside "ethniCITY" / "STATEs".
   if (
-    labelLower.includes('city') ||
+    /\bcity\b/.test(labelLower) ||
     labelLower.includes('location') ||
     labelLower.includes('address')
   ) {
     return profile?.preferences?.location?.current_city || profile?.personal?.location || '';
   }
-  if (labelLower.includes('state') || labelLower.includes('province')) {
+  if (/\bstate\b/.test(labelLower) || /\bprovince\b/.test(labelLower)) {
     return 'California';
   }
-  if (labelLower.includes('zip') || labelLower.includes('postal')) {
+  if (/\bzip\b/.test(labelLower) || labelLower.includes('postal')) {
     return '95134';
   }
   if (
     idLower === 'country' ||
     labelLower === 'country' ||
-    (labelLower.includes('country') && !labelLower.includes('city'))
+    (labelLower.includes('country') && !/\bcity\b/.test(labelLower))
   ) {
     return 'United States';
   }
@@ -897,6 +933,530 @@ export function smartMatchOption(answer: string, options: string[], label: strin
   return null;
 }
 
+async function fillAshbyForm(
+  page: Page, job: ScoredJob, profile: any,
+  getPreScrapedAnswer: (fieldId: string, label: string) => string | null,
+): Promise<void> {
+  console.log('  Filling Ashby form...');
+  console.log('  [Ashby] Section 1: resume upload');
+  // 1. Upload resume FIRST (Ashby re-renders form after upload)
+  try {
+  const resumeInput = await page.$('input[type="file"][id="_systemfield_resume"]');
+  if (resumeInput) {
+    const resumeDir = path.join(__dirname, '../../data/resume');
+    try {
+      const fsModule = await import('fs');
+      const files = fsModule.readdirSync(resumeDir).filter((f: string) => f.toLowerCase().endsWith('.pdf'));
+      if (files.length > 0) {
+        const resumePath = path.join(resumeDir, files[0]);
+        const [fileChooser] = await Promise.all([
+          page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
+          resumeInput.evaluate((el) => (el as HTMLElement).click()),
+        ]);
+        if (fileChooser) {
+          await fileChooser.setFiles(resumePath);
+        } else {
+          await resumeInput.setInputFiles(resumePath);
+        }
+        console.log(`    ✓ Uploaded resume: ${files[0]}`);
+        await sleep(2000);
+      }
+    } catch { /* skip */ }
+  }
+  } catch (err) { console.log(`  [Ashby] 1 resume error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  [Ashby] Section 1b: cover letter');
+  try {
+  // 1b. Upload cover letter if the field exists
+  const clInput = await page.$('input[type="file"][id="cover_letter"], input[type="file"][id*="cover"]');
+  if (clInput) {
+    try {
+      const { CoverLetterModel } = await import('../db');
+      const { ApplicationFieldsModel } = await import('@job-agent/shared');
+      let coverLetter = '';
+      const preFilled = await ApplicationFieldsModel.findOne({ externalJobId: job.id }).lean().catch(() => null) as any;
+      if (preFilled?.coverLetter) coverLetter = preFilled.coverLetter;
+      if (!coverLetter) {
+        const clDoc = await CoverLetterModel.findOne({ externalJobId: job.id }).sort({ generatedAt: -1 }).lean().catch(() => null);
+        if ((clDoc as any)?.content) coverLetter = (clDoc as any).content;
+      }
+      if (!coverLetter) {
+        const { generateCoverLetter } = await import('../cover-letter/cover-letter');
+        coverLetter = await generateCoverLetter(job);
+        const { saveCoverLetter } = await import('../db');
+        await saveCoverLetter(job.id, coverLetter);
+      }
+      if (coverLetter) {
+        const fsModule = await import('fs');
+        const tempDir = path.join(__dirname, '../../data/cover-letters');
+        fsModule.mkdirSync(tempDir, { recursive: true });
+        // Use .pdf extension — Ashby accepts PDF and the upload handler processes it
+        const filename = `${job.company.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-cover-letter.pdf`;
+        const filepath = path.join(tempDir, filename);
+        fsModule.writeFileSync(filepath, coverLetter);
+        // Click the Upload File button in the Cover Letter section
+        const clLabel = page.locator('label:has-text("Cover Letter")');
+        const clSection = clLabel.locator('..');
+        const uploadBtn = clSection.locator('text=Upload File');
+        if (await uploadBtn.count() > 0) {
+          const [fileChooser] = await Promise.all([
+            page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
+            uploadBtn.first().click(),
+          ]);
+          if (fileChooser) {
+            await fileChooser.setFiles(filepath);
+            console.log(`    ✓ Uploaded cover letter (${coverLetter.length} chars)`);
+            await sleep(2000);
+          }
+        } else {
+          // Fallback: setInputFiles on the hidden input
+          await clInput.setInputFiles(filepath);
+          console.log(`    ✓ Cover letter set via input (${coverLetter.length} chars)`);
+          await sleep(1000);
+        }
+      }
+    } catch (err) {
+      console.log(`    ○ Cover letter failed: ${(err as Error).message.slice(0, 50)}`);
+    }
+  }
+  } catch (err) { console.log(`  [Ashby] 1b cover letter error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  [Ashby] Section 2: text inputs');
+  // 2. Fill all text/email/tel inputs
+  try {
+  const allInputs = await page.$$('input[type="text"], input[type="email"], input[type="tel"], input[type="url"]');
+  for (const inp of allInputs) {
+    try {
+    const isHidden = await inp.isHidden().catch(() => true);
+    if (isHidden) continue;
+
+    const id = await inp.getAttribute('id').catch(() => '') || '';
+    const inputType = await inp.getAttribute('type').catch(() => '') || '';
+    const placeholder = (await inp.getAttribute('placeholder').catch(() => '') || '').toLowerCase();
+    const label = await inp.evaluate((el) => {
+      const wrapper = el.closest('[class*="field"], [class*="Field"]');
+      const labelEl = wrapper?.querySelector('label');
+      return labelEl?.textContent?.trim() || '';
+    }).catch(() => '');
+    const hint = (placeholder + ' ' + label).toLowerCase();
+
+    const existing = await inp.inputValue().catch(() => '');
+    if (existing) continue;
+
+    let value = '';
+    if (id === '_systemfield_name') value = profile?.personal?.name || '';
+    else if (id === '_systemfield_email') value = profile?.personal?.email || '';
+    else if (inputType === 'tel' || hint.includes('phone')) value = profile?.personal?.phone || '';
+    else if (hint.includes('linkedin')) value = profile?.personal?.linkedin || '';
+    else if (hint.includes('github')) value = profile?.personal?.github || '';
+    else if (hint.includes('website') || hint.includes('portfolio')) value = '';
+    else if (hint.includes('location') || hint.includes('city') || hint.includes('address') ||
+             hint.includes('where') || hint.includes('work from') || hint.includes('working from') ||
+             hint.includes('payroll'))
+      value = (profile?.preferences?.location?.current_city || profile?.personal?.location || '').replace(/, USA$/, '');
+    else {
+      // Try pre-scraped or rules
+      const preAnswer = getPreScrapedAnswer(id, label || placeholder);
+      if (preAnswer) value = preAnswer;
+      if (!value) {
+        const directAnswer = getDirectAnswer(id, label || placeholder, profile);
+        if (directAnswer) value = directAnswer;
+      }
+    }
+
+    if (value) {
+      await inp.scrollIntoViewIfNeeded().catch(() => {});
+      await inp.click({ timeout: 3000 }).catch(async () => {
+        await inp.focus().catch(() => {});
+      });
+      await inp.fill('').catch(() => {});
+      await inp.type(value, { delay: 5 }).catch(async () => {
+        await inp.fill(value).catch(() => {});
+      });
+      await sleep(100);
+      console.log(`    ✓ Filled: "${label || id}" = "${value.slice(0, 40)}"`);
+    }
+    } catch (err) {
+      console.log(`    ○ Text input error: ${(err as Error).message.slice(0, 60)}`);
+    }
+  }
+  } catch (err) { console.log(`  [Ashby] 2 text input error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  [Ashby] Section 2b: native selects');
+  // 2b. Handle native <select> dropdowns
+  try {
+  const selects = await page.$$('select');
+  for (const sel of selects) {
+    const isHidden = await sel.isHidden().catch(() => true);
+    if (isHidden) continue;
+    const currentVal = await sel.$eval('option:checked', (o: Element) => (o as HTMLOptionElement).value).catch(() => '');
+    if (currentVal) continue;
+
+    const label = await sel.evaluate((el) => {
+      const wrapper = el.closest('[class*="field"], [class*="Field"]');
+      const labelEl = wrapper?.querySelector('label');
+      return labelEl?.textContent?.trim() || '';
+    }).catch(() => '');
+    if (!label) continue;
+
+    const options = await sel.$$eval('option:not([value=""])', (opts: Element[]) =>
+      opts.map((o) => (o as HTMLOptionElement).text.trim()),
+    );
+
+    // Get answer from profile
+    const answer = getDirectAnswer('', label, profile, 'select');
+    if (answer) {
+      const matched = smartMatchOption(answer, options, label);
+      if (matched) {
+        await sel.selectOption({ label: matched });
+        console.log(`    ✓ Select: "${label}" → "${matched}"`);
+        continue;
+      }
+    }
+    // Try pre-scraped
+    const preAnswer = getPreScrapedAnswer('', label);
+    if (preAnswer) {
+      const matched = smartMatchOption(preAnswer, options, label);
+      if (matched) {
+        await sel.selectOption({ label: matched });
+        console.log(`    ✓ Select (pre-scraped): "${label}" → "${matched}"`);
+        continue;
+      }
+    }
+    console.log(`    ○ Select empty: "${label}" [${options.join(', ')}]`);
+  }
+  } catch (err) { console.log(`  [Ashby] 2b select error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  [Ashby] Section 2c: comboboxes');
+  // 2c. Handle combobox/React Select dropdowns
+  try {
+  const comboboxes = await page.$$('input[role="combobox"]');
+  for (const combo of comboboxes) {
+    const isHidden = await combo.isHidden().catch(() => true);
+    if (isHidden) continue;
+    const id = await combo.getAttribute('id').catch(() => '') || '';
+
+    // Check if already has value
+    const hasValue = await combo.evaluate((el) => {
+      const container = el.closest('[class*="select"]');
+      const sv = container?.querySelector('[class*="singleValue"], [class*="single-value"]');
+      return sv?.textContent?.trim() || '';
+    }).catch(() => '');
+    if (hasValue) continue;
+
+    const label = await combo.evaluate((el) => {
+      const wrapper = el.closest('[class*="field"], [class*="Field"]');
+      const labelEl = wrapper?.querySelector('label');
+      return labelEl?.textContent?.trim() || '';
+    }).catch(() => '');
+    if (!label) continue;
+
+    // Get answer
+    let answer = getPreScrapedAnswer(id, label);
+    if (!answer) answer = getDirectAnswer(id, label, profile, 'select');
+    if (!answer) continue;
+
+    console.log(`    Combobox "${label}": answer="${answer}"`);
+
+    // Type answer to filter, then click match
+    await combo.click({ timeout: 3000 }).catch(() => {});
+    await sleep(300);
+    await combo.fill('');
+    await combo.type(answer, { delay: 5 });
+    await sleep(500);
+
+    // Click matching option from scoped menu
+    const menuId = await combo.getAttribute('aria-controls').catch(() => '') || '';
+    let clicked = false;
+    if (menuId) {
+      const opts = page.locator(`#${menuId} [class*="option"]`);
+      const count = await opts.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const text = (await opts.nth(i).textContent().catch(() => '') || '').trim();
+        if (text.toLowerCase() === answer.toLowerCase() ||
+            text.toLowerCase().includes(answer.toLowerCase()) ||
+            answer.toLowerCase().includes(text.toLowerCase())) {
+          await opts.nth(i).click({ timeout: 3000 });
+          console.log(`    ✓ Combobox: "${label}" → "${text}"`);
+          clicked = true;
+          break;
+        }
+      }
+    }
+    if (!clicked) {
+      await page.keyboard.press('Enter');
+      await sleep(200);
+      const newVal = await combo.evaluate((el) => {
+        const c = el.closest('[class*="select"]');
+        const v = c?.querySelector('[class*="singleValue"]');
+        return v?.textContent?.trim() || '';
+      }).catch(() => '');
+      if (newVal) {
+        console.log(`    ✓ Combobox: "${label}" → "${newVal}" (Enter)`);
+      } else {
+        await page.keyboard.press('Escape').catch(() => {});
+        console.log(`    ○ Combobox: "${label}" — couldn't select "${answer}"`);
+      }
+    }
+  }
+  } catch (err) { console.log(`  [Ashby] 2c combobox error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  [Ashby] Section 2d0: yes/no button groups');
+  // 2d0. Handle Ashby custom Yes/No question (rendered as <button> pair, not checkbox/radio)
+  try {
+    const yesNoContainers = await page.$$('[class*="yesno"]');
+    for (const container of yesNoContainers) {
+      try {
+        // Find question label — walk up to the field entry wrapper
+        const label = await container.evaluate((el) => {
+          let node: Element | null = el;
+          for (let i = 0; i < 6 && node; i++) {
+            const wrapperLabel = node.querySelector('label');
+            if (wrapperLabel && !wrapperLabel.contains(el)) {
+              return (wrapperLabel.textContent || '').trim();
+            }
+            node = node.parentElement;
+          }
+          return '';
+        }).catch(() => '');
+        if (!label) continue;
+
+        // Check if already answered (a button has class containing "selected" / "checked" / aria-pressed)
+        const already = await container.evaluate((el) => {
+          const btns = el.querySelectorAll('button');
+          for (const b of Array.from(btns)) {
+            const cls = (b.className || '');
+            if (/selected|checked|active/i.test(cls)) return true;
+            if (b.getAttribute('aria-pressed') === 'true') return true;
+          }
+          const cb = el.querySelector('input[type="checkbox"]');
+          return !!(cb && (cb as HTMLInputElement).checked);
+        }).catch(() => false);
+        if (already) continue;
+
+        let answer = getPreScrapedAnswer('', label);
+        if (!answer) answer = getDirectAnswer('', label, profile, 'select');
+        if (!answer) continue;
+
+        const want = answer.toLowerCase().startsWith('y') ? 'Yes' : answer.toLowerCase().startsWith('n') ? 'No' : '';
+        if (!want) continue;
+        const btn = await container.$(`button:has-text("${want}")`);
+        if (!btn) continue;
+        await btn.scrollIntoViewIfNeeded().catch(() => {});
+        const clicked = await btn.click({ timeout: 2000 }).then(() => true).catch(() => false);
+        if (!clicked) {
+          await btn.evaluate((b) => (b as HTMLButtonElement).click()).catch(() => {});
+        }
+        console.log(`    ✓ Yes/No: "${label.slice(0, 60)}" → "${want}"`);
+        await sleep(200);
+      } catch { /* next container */ }
+    }
+  } catch (err) { console.log(`  [Ashby] 2d0 yes/no error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  [Ashby] Section 2d: checkboxes');
+  // 2d. Handle checkboxes (multi-select questions)
+  try {
+  const checkboxGroups = await page.$$('[class*="field"], [class*="Field"]');
+  for (const group of checkboxGroups) {
+    try {
+      const checkboxes = await group.$$('input[type="checkbox"]');
+      if (checkboxes.length === 0) continue;
+
+      const checked = await group.$('input[type="checkbox"]:checked');
+      if (checked) continue;
+
+      const label = await group.evaluate((el) => {
+        const labelEl = el.querySelector('label');
+        return labelEl?.textContent?.trim() || '';
+      }).catch(() => '');
+      if (!label) continue;
+
+      const answer = getDirectAnswer('', label, profile, 'select');
+      if (!answer) continue;
+
+      // Click matching checkbox option
+      for (const cb of checkboxes) {
+        try {
+          const cbLabel = await cb.evaluate((el) => {
+            const input = el as HTMLInputElement;
+            // 1. <label for={id}>
+            if (input.id) {
+              const l = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
+              if (l && l.textContent) return l.textContent.trim();
+            }
+            // 2. aria-label on input
+            const aria = input.getAttribute('aria-label');
+            if (aria) return aria.trim();
+            // 3. closest <label>
+            const wrappingLabel = input.closest('label');
+            if (wrappingLabel && wrappingLabel.textContent) return wrappingLabel.textContent.trim();
+            // 4. immediate next sibling that's a label/span
+            const sib = input.nextElementSibling;
+            if (sib && (sib.tagName === 'LABEL' || sib.tagName === 'SPAN') && sib.textContent) {
+              return sib.textContent.trim();
+            }
+            // 5. parent's own text (without merging sibling rows)
+            const parent = input.parentElement;
+            if (parent) {
+              const directText = Array.from(parent.childNodes)
+                .filter(n => n.nodeType === Node.TEXT_NODE || (n as Element).tagName === 'SPAN' || (n as Element).tagName === 'LABEL')
+                .map(n => n.textContent || '')
+                .join(' ').trim();
+              if (directText) return directText;
+            }
+            return '';
+          }).catch(() => '');
+          const a = answer.toLowerCase().trim();
+          const l = cbLabel.toLowerCase().trim();
+          if (!l) continue;
+          // Exact match or answer equals label; avoid "yes" matching "yesno" by requiring word-boundary match
+          const matched = l === a || (l.length <= 6 && a.length <= 6 && (l.startsWith(a) || a.startsWith(l)))
+            || new RegExp(`\\b${a.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`).test(l);
+          if (!matched) continue;
+          // Click the associated label if the input is hidden (common for custom checkboxes)
+          await cb.scrollIntoViewIfNeeded().catch(() => {});
+          const clicked = await cb.click({ force: true, timeout: 2000 }).then(() => true).catch(() => false);
+          if (!clicked) {
+            // Fallback: click the parent label wrapper
+            const clickedLabel = await cb.evaluate((el) => {
+              const lbl = (el as HTMLElement).closest('label');
+              if (lbl) { (lbl as HTMLElement).click(); return true; }
+              const parent = (el as HTMLElement).parentElement;
+              if (parent) { parent.click(); return true; }
+              return false;
+            }).catch(() => false);
+            if (!clickedLabel) continue;
+          }
+          console.log(`    ✓ Checkbox: "${label}" → "${cbLabel}"`);
+        } catch { /* next checkbox */ }
+      }
+    } catch { /* next group */ }
+  }
+  } catch (err) { console.log(`  [Ashby] 2d checkbox error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  [Ashby] Section 3: radios');
+  try {
+  // 3. Handle radio groups
+  const radioInputs = await page.$$('input[type="radio"]');
+  if (radioInputs.length > 0) {
+    const radioNames = new Set<string>();
+    for (const r of radioInputs) {
+      const name = await r.getAttribute('name').catch(() => '') || '';
+      if (name) radioNames.add(name);
+    }
+
+    for (const name of radioNames) {
+      const checked = await page.$(`input[type="radio"][name="${name}"]:checked`);
+      if (checked) continue;
+
+      const firstRadio = await page.$(`input[type="radio"][name="${name}"]`);
+      if (!firstRadio) continue;
+      const groupLabel = await firstRadio.evaluate((el) => {
+        // Walk up to find fieldset or field wrapper, get the question label (not option label)
+        let node: Element | null = el;
+        for (let i = 0; i < 10 && node; i++) {
+          node = node.parentElement;
+          if (!node) break;
+          // Check for fieldset legend
+          const legend = node.querySelector('legend');
+          if (legend) return legend.textContent?.trim() || '';
+          // Check for a label that is a DIRECT child (not nested inside options)
+          const labels = node.querySelectorAll(':scope > label');
+          for (const label of Array.from(labels)) {
+            if (!label.querySelector('input')) return label.textContent?.trim() || '';
+          }
+        }
+        return '';
+      }).catch(() => '');
+      if (!groupLabel) continue;
+
+      // Get option texts
+      const allRadios = await page.$$(`input[type="radio"][name="${name}"]`);
+      const optionTexts: string[] = [];
+      for (const radio of allRadios) {
+        const text = await radio.evaluate((el) => {
+          // Ashby: option text is in nextSibling of parent span, or in parent's parent div
+          const parentSpan = el.parentElement;
+          const nextSibling = parentSpan?.nextElementSibling;
+          if (nextSibling?.textContent?.trim()) return nextSibling.textContent.trim();
+          // Try parent div (contains full option text)
+          const optionDiv = parentSpan?.parentElement;
+          if (optionDiv?.textContent?.trim()) return optionDiv.textContent.trim();
+          // Fallback: label or parent
+          const label = el.closest('label');
+          return (label?.textContent || '').trim();
+        }).catch(() => '');
+        if (text) optionTexts.push(text);
+      }
+
+      console.log(`    Radio "${groupLabel}": ${optionTexts.join(' | ')}`);
+
+      // Pick best option
+      const gl = groupLabel.toLowerCase();
+      const hasLocationOptions = optionTexts.some(o =>
+        o.toLowerCase().includes('remote') || o.toLowerCase().includes('hybrid') ||
+        o.toLowerCase().includes('nyc') || o.toLowerCase().includes('office') ||
+        o.toLowerCase().includes('relocat')
+      );
+      let answer = '';
+      if (gl.includes('work') || gl.includes('location') || gl.includes('remote') ||
+          gl.includes('office') || gl.includes('where') || hasLocationOptions) {
+        answer = optionTexts.find(o => o.toLowerCase().includes('remote')) ||
+                 optionTexts.find(o => o.toLowerCase().includes('hybrid')) ||
+                 optionTexts.find(o => o.toLowerCase().includes('relocat')) ||
+                 optionTexts[0] || '';
+      }
+
+      if (answer) {
+        for (const radio of allRadios) {
+          const radioText = await radio.evaluate((el) => {
+            const parentSpan = el.parentElement;
+            const nextSibling = parentSpan?.nextElementSibling;
+            if (nextSibling?.textContent?.trim()) return nextSibling.textContent.trim();
+            const optionDiv = parentSpan?.parentElement;
+            if (optionDiv?.textContent?.trim()) return optionDiv.textContent.trim();
+            const label = el.closest('label');
+            return (label?.textContent || '').trim();
+          }).catch(() => '');
+          if (radioText.toLowerCase().includes(answer.toLowerCase()) || answer.toLowerCase().includes(radioText.toLowerCase())) {
+            await radio.click({ force: true });
+            console.log(`    ✓ Radio: "${groupLabel}" → "${radioText}"`);
+            break;
+          }
+        }
+      }
+    }
+  }
+  } catch (err) { console.log(`  [Ashby] 3 radio error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  [Ashby] Section 4: textareas');
+  try {
+  // 4. Fill textareas
+  const textareas = await page.$$('textarea');
+  for (const ta of textareas) {
+    const isHidden = await ta.isHidden().catch(() => true);
+    if (isHidden) continue;
+    const existing = await ta.inputValue().catch(() => '');
+    if (existing) continue;
+    const label = await ta.evaluate((el) => {
+      const wrapper = el.closest('[class*="field"], [class*="Field"]');
+      const labelEl = wrapper?.querySelector('label');
+      return labelEl?.textContent?.trim() || '';
+    }).catch(() => '');
+    if (!label) continue;
+    // Try pre-scraped or rules
+    const preAnswer = getPreScrapedAnswer('', label);
+    if (preAnswer) {
+      await ta.click({ force: true }).catch(() => {});
+      await ta.fill(preAnswer);
+      console.log(`    ✓ Textarea: "${label}"`);
+    }
+  }
+  } catch (err) { console.log(`  [Ashby] 4 textarea error: ${(err as Error).message.slice(0, 80)}`); }
+
+  console.log('  Ashby form fill complete.');
+}
+
 async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
   // Load profile for direct field mapping
   const { loadProfile } = await import('../db');
@@ -907,31 +1467,55 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
   const preScraped = (await ApplicationFieldsModel.findOne({ externalJobId: job.id })
     .lean()
     .catch(() => null)) as any;
+  // Filter out LLM refusal paragraphs stored in legacy pre-scraped data
+  function isRefusalText(v: string): boolean {
+    if (!v) return true;
+    const t = v.trim().toLowerCase();
+    if (t.length > 400) return true;
+    const markers = [
+      "i can't answer", "i cannot answer", "i don't wish to",
+      "the candidate should", "candidate needs to", "candidate themselves",
+      "i decline to", "i shouldn't guess", "i'm not able to", "i am not able to",
+      "only the candidate", 'inferred from', 'not included in',
+      'sensitive personal', 'this is personal',
+    ];
+    return markers.some((m) => t.includes(m));
+  }
+
   const preAnswersByFieldId = new Map<string, { value: string; source: string }>();
   const preAnswersByLabel = new Map<string, { value: string; source: string }>();
+  let skippedRefusals = 0;
   if (preScraped?.fields) {
     for (const f of preScraped.fields) {
       if (f.value && f.source !== 'unknown') {
+        if (isRefusalText(f.value)) { skippedRefusals++; continue; }
         if (f.fieldId) preAnswersByFieldId.set(f.fieldId, { value: f.value, source: f.source });
         preAnswersByLabel.set(f.label.toLowerCase().trim(), { value: f.value, source: f.source });
       }
     }
     console.log(
-      `  Pre-scraped answers loaded: ${preAnswersByFieldId.size + preAnswersByLabel.size} answers available`,
+      `  Pre-scraped answers loaded: ${preAnswersByFieldId.size + preAnswersByLabel.size} answers available${skippedRefusals ? ` (${skippedRefusals} refusals filtered)` : ''}`,
     );
   }
 
   // Helper: look up pre-scraped answer by fieldId or label (with fuzzy fallback)
   function getPreScrapedAnswer(fieldId: string, label: string): string | null {
+    const pick = (v: string | undefined | null): string | null => {
+      if (!v) return null;
+      if (isRefusalText(v)) return null;
+      return v;
+    };
     // 1. Exact fieldId match
     if (fieldId) {
       const byId = preAnswersByFieldId.get(fieldId);
-      if (byId) return byId.value;
+      const v = pick(byId?.value);
+      if (v) return v;
     }
     // 2. Exact label match
     const normalizedLabel = label.toLowerCase().trim();
     const byLabel = preAnswersByLabel.get(normalizedLabel);
-    if (byLabel) return byLabel.value;
+    const v2 = pick(byLabel?.value);
+    if (v2) return v2;
     // 3. Fuzzy label match — handles typos, extra words, "in in" vs "in"
     const stripped = normalizedLabel
       .replace(/[^\w\s]/g, '')
@@ -942,10 +1526,16 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
         .replace(/[^\w\s]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
-      if (keyStripped === stripped) return entry.value;
+      if (keyStripped === stripped) {
+        const v = pick(entry.value);
+        if (v) return v;
+      }
       // Substring match for long labels (>20 chars)
       if (stripped.length > 20 && keyStripped.length > 20) {
-        if (keyStripped.includes(stripped) || stripped.includes(keyStripped)) return entry.value;
+        if (keyStripped.includes(stripped) || stripped.includes(keyStripped)) {
+          const v = pick(entry.value);
+          if (v) return v;
+        }
       }
     }
     return null;
@@ -953,6 +1543,12 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
 
   // Track filled field IDs to avoid re-processing
   const filledIds = new Set<string>();
+
+  // ── Ashby jobs: use dedicated handler and return (skip all Greenhouse handlers) ──
+  if (job.source === 'ashby') {
+    await fillAshbyForm(page, job, profile, getPreScrapedAnswer);
+    return;
+  }
 
   // Scroll through entire form to ensure all lazy-loaded fields are in DOM
   await page.evaluate(`(() => {
@@ -991,19 +1587,31 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
         continue;
       }
 
+      // CRITICAL: skip already-filled fields (fixes duplicate filling across passes)
+      if (id && filledIds.has(id)) continue;
+
       const label = await getFieldLabel(combo, page);
-      console.log(`    Combobox id="${id}" label="${label?.slice(0, 60) || '(none)'}"`);
       if (!label || isSkippableLabel(label)) {
-        console.log(`    → skipped (${!label ? 'no label' : 'skippable'})`);
         continue;
       }
+      console.log(`    Combobox id="${id}" label="${label.slice(0, 60)}"`);
 
-      // Check if already has a value selected
+      // Check if already has a value selected (Greenhouse React Select uses select__control/select-shell)
       const selectedValue = await combo.evaluate((el) => {
-        const container = el.closest('[class*="select"]');
-        if (!container) return '';
-        const val = container.querySelector('[class*="singleValue"], [class*="single-value"]');
-        return val?.textContent?.trim() || '';
+        const shell = el.closest('[class*="select-shell"], [class*="select__container"], [class*="select__control"]');
+        if (!shell) return '';
+        // Greenhouse marks filled value containers with --has-value modifier
+        const filledContainer = shell.querySelector('[class*="value-container"][class*="has-value"], [class*="value-container--has-value"]');
+        if (filledContainer) {
+          const sv = filledContainer.querySelector('[class*="single-value"], [class*="singleValue"], [class*="multi-value"], [class*="multiValue"]');
+          if (sv) return sv.textContent?.trim() || '';
+          const text = filledContainer.textContent?.trim() || '';
+          if (text) return text;
+        }
+        // Fallback: check for single-value div anywhere in shell
+        const singleValue = shell.querySelector('[class*="single-value"], [class*="singleValue"]');
+        if (singleValue) return singleValue.textContent?.trim() || '';
+        return '';
       }).catch(() => '');
 
       if (selectedValue) {
@@ -1021,7 +1629,7 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
       if (!answer) {
         try {
           const ruleAnswer = await answerQuestion(label, 'select');
-          if (ruleAnswer) answer = ruleAnswer;
+          if (ruleAnswer && !isRefusalText(ruleAnswer)) answer = ruleAnswer;
         } catch {
           /* fall through */
         }
@@ -1052,21 +1660,70 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
         const menuId = await combo.getAttribute('aria-controls').catch(() => '') || '';
         let clicked = false;
 
-        if (menuId) {
-          // Scoped: find options inside the menu this combobox controls
-          const scopedOpts = page.locator(`#${menuId} [class*="option"], #${menuId} [role="option"]`);
-          const count = await scopedOpts.count().catch(() => 0);
-          console.log(`    Scoped menu #${menuId}: ${count} options`);
-          for (let i = 0; i < count; i++) {
-            const text = (await scopedOpts.nth(i).textContent().catch(() => '') || '').trim();
+        // Detects the React-Select "no matches" placeholder so we don't click it.
+        const isPlaceholder = (t: string) =>
+          /^(no options?|no results?|nothing found|loading)/i.test((t || '').trim());
+
+        const tryScopedMatch = async (id: string): Promise<{ clicked: boolean; count: number }> => {
+          const scoped = page.locator(`#${id} [class*="option"], #${id} [role="option"]`);
+          const cnt = await scoped.count().catch(() => 0);
+          const texts: string[] = [];
+          for (let i = 0; i < cnt; i++) {
+            const t = (await scoped.nth(i).textContent().catch(() => '') || '').trim();
+            texts.push(t);
+          }
+          const realCount = texts.filter((t) => t && !isPlaceholder(t)).length;
+          console.log(`    Scoped menu #${id}: ${cnt} options (${realCount} real)`);
+          // Pass 1: smart match by alias/semantics
+          const smart = smartMatchOption(answer, texts.filter((t) => !isPlaceholder(t)), label);
+          if (smart) {
+            const idx = texts.indexOf(smart);
+            if (idx >= 0) {
+              await scoped.nth(idx).click({ timeout: 3000 });
+              console.log(`    ✓ Dropdown: "${label}" → "${smart}" (scoped/smart)`);
+              return { clicked: true, count: realCount };
+            }
+          }
+          // Pass 2: substring match (ignoring placeholders)
+          for (let i = 0; i < cnt; i++) {
+            const text = texts[i];
+            if (!text || isPlaceholder(text)) continue;
             if (text.toLowerCase() === answer.toLowerCase() ||
                 text.toLowerCase().includes(answer.toLowerCase()) ||
                 answer.toLowerCase().includes(text.toLowerCase())) {
-              await scopedOpts.nth(i).click({ timeout: 3000 });
+              await scoped.nth(i).click({ timeout: 3000 });
               console.log(`    ✓ Dropdown: "${label}" → "${text}" (scoped)`);
-              clicked = true;
-              break;
+              return { clicked: true, count: realCount };
             }
+          }
+          // Pass 3: if filter narrowed to a single real option, trust it
+          if (realCount === 1) {
+            const idx = texts.findIndex((t) => t && !isPlaceholder(t));
+            if (idx >= 0 && !/\+\d{1,3}$/.test(texts[idx])) {
+              await scoped.nth(idx).click({ timeout: 3000 });
+              console.log(`    ✓ Dropdown: "${label}" → "${texts[idx]}" (scoped/only-option)`);
+              return { clicked: true, count: realCount };
+            }
+          }
+          return { clicked: false, count: realCount };
+        };
+
+        if (menuId) {
+          let result = await tryScopedMatch(menuId);
+          clicked = result.clicked;
+          // If the filter hid all options (0 real), clear filter and retry with full list
+          if (!clicked && result.count === 0) {
+            // Close menu, clear the input, reopen
+            await page.keyboard.press('Escape').catch(() => {});
+            await sleep(200);
+            await combo.click({ timeout: 2000 }).catch(() => {});
+            await sleep(200);
+            // Clear any lingering filter via keyboard (React Select can be finicky with fill())
+            await combo.press('Control+A').catch(() => {});
+            await combo.press('Delete').catch(() => {});
+            await sleep(400);
+            result = await tryScopedMatch(menuId);
+            clicked = result.clicked;
           }
         }
 
@@ -1221,6 +1878,183 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
     }
   }
 
+  // ── Ashby handled at top of fillFormFields — this block is dead code ──
+  if (false) {
+    // 1. Upload resume FIRST (Ashby re-renders form after upload)
+    const resumeInput = await page.$('input[type="file"][id="_systemfield_resume"], input[type="file"]');
+    if (resumeInput) {
+      const resumeDir = path.join(__dirname, '../../data/resume');
+      try {
+        const fs = await import('fs');
+        const files = fs.readdirSync(resumeDir).filter((f: string) => f.toLowerCase().endsWith('.pdf'));
+        if (files.length > 0) {
+          await resumeInput.setInputFiles(path.join(resumeDir, files[0]));
+          console.log(`    ✓ Uploaded resume: ${files[0]}`);
+          await sleep(2000); // Wait for Ashby to re-render after upload
+        }
+      } catch { /* skip */ }
+    }
+
+    // 1b. Upload cover letter if field exists (re-query after resume upload re-render)
+    await sleep(500);
+    let coverLetterInput = await page.$('input[type="file"][id="cover_letter"]');
+    if (!coverLetterInput) coverLetterInput = await page.$('input[type="file"][id*="cover"]');
+    console.log(`    Cover letter input: ${coverLetterInput ? 'FOUND' : 'not found'}`);
+    if (coverLetterInput) {
+      try {
+        // Get existing cover letter from DB
+        const { CoverLetterModel } = await import('../db');
+        const { ApplicationFieldsModel } = await import('@job-agent/shared');
+        let coverLetter = '';
+
+        const preFilled = await ApplicationFieldsModel.findOne({ externalJobId: job.id }).lean().catch(() => null) as any;
+        if (preFilled?.coverLetter) coverLetter = preFilled.coverLetter;
+        if (!coverLetter) {
+          const existing = await CoverLetterModel.findOne({ externalJobId: job.id }).sort({ generatedAt: -1 }).lean().catch(() => null);
+          if ((existing as any)?.content) coverLetter = (existing as any).content;
+        }
+        if (!coverLetter) {
+          // Generate one
+          const { generateCoverLetter } = await import('../cover-letter/cover-letter');
+          coverLetter = await generateCoverLetter(job);
+          const { saveCoverLetter } = await import('../db');
+          await saveCoverLetter(job.id, coverLetter);
+        }
+
+        if (coverLetter) {
+          const tempDir = path.join(__dirname, '../../data/cover-letters');
+          const fsModule = await import('fs');
+          fsModule.mkdirSync(tempDir, { recursive: true });
+          const filename = `${job.company.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-cover-letter.txt`;
+          const filepath = path.join(tempDir, filename);
+          fsModule.writeFileSync(filepath, coverLetter);
+          await coverLetterInput.setInputFiles(filepath);
+          console.log(`    ✓ Uploaded cover letter (${coverLetter.length} chars)`);
+          await sleep(1000);
+        }
+      } catch (err) {
+        console.log(`    ○ Cover letter upload failed: ${(err as Error).message.slice(0, 50)}`);
+      }
+    }
+
+    // 2. Fill text/email/tel inputs AFTER resume upload (avoids re-render clearing values)
+    const allInputs = await page.$$('input[type="text"], input[type="email"], input[type="tel"], input[type="url"]');
+    for (const inp of allInputs) {
+      const isHidden = await inp.isHidden().catch(() => true);
+      if (isHidden) continue;
+
+      const id = await inp.getAttribute('id').catch(() => '') || '';
+      const inputType = await inp.getAttribute('type').catch(() => '') || '';
+      const placeholder = (await inp.getAttribute('placeholder').catch(() => '') || '').toLowerCase();
+      const label = await inp.evaluate((el) => {
+        const wrapper = el.closest('[class*="field"], [class*="Field"]');
+        const labelEl = wrapper?.querySelector('label');
+        return labelEl?.textContent?.trim() || '';
+      }).catch(() => '');
+      const hint = (placeholder + ' ' + label).toLowerCase();
+
+      const existing = await inp.inputValue().catch(() => '');
+      if (existing) { filledIds.add(id); continue; }
+
+      let value = '';
+      if (id === '_systemfield_name') value = profile?.personal?.name || '';
+      else if (id === '_systemfield_email') value = profile?.personal?.email || '';
+      else if (inputType === 'tel' || hint.includes('phone')) value = profile?.personal?.phone || '';
+      else if (hint.includes('linkedin')) value = profile?.personal?.linkedin || '';
+      else if (hint.includes('github')) value = profile?.personal?.github || '';
+      else if (hint.includes('website') || hint.includes('portfolio')) value = '';
+      else if (hint.includes('location') || hint.includes('city') || hint.includes('address') ||
+               hint.includes('where') || hint.includes('work from') || hint.includes('working from') ||
+               hint.includes('payroll'))
+        value = (profile?.preferences?.location?.current_city || profile?.personal?.location || '').replace(/, USA$/, '');
+
+      if (value) {
+        await inp.click();
+        await inp.fill('');
+        await inp.type(value, { delay: 5 });
+        await sleep(100);
+        filledIds.add(id);
+        console.log(`    ✓ Filled (Ashby): "${label || id}" = "${value.slice(0, 40)}"`);
+      }
+    }
+
+    // 3. Handle radio groups — use Playwright locator to click the option text directly
+    const radioInputs = await page.$$('input[type="radio"]');
+    if (radioInputs.length > 0) {
+      // Group by name attribute
+      const radioNames = new Set<string>();
+      for (const r of radioInputs) {
+        const name = await r.getAttribute('name').catch(() => '') || '';
+        if (name) radioNames.add(name);
+      }
+
+      for (const name of radioNames) {
+        // Check if already selected
+        const checked = await page.$(`input[type="radio"][name="${name}"]:checked`);
+        if (checked) continue;
+
+        // Get the group label by finding the wrapper
+        const firstRadio = await page.$(`input[type="radio"][name="${name}"]`);
+        if (!firstRadio) continue;
+        const groupLabel = await firstRadio.evaluate((el) => {
+          // Walk up to find the field wrapper with the question label
+          let node = el.parentElement;
+          for (let i = 0; i < 10 && node; i++) {
+            const label = node.querySelector('label');
+            if (label && !label.querySelector('input')) {
+              return label.textContent?.trim() || '';
+            }
+            node = node.parentElement;
+          }
+          return '';
+        }).catch(() => '');
+
+        if (!groupLabel) continue;
+
+        // Get option labels
+        const optionTexts = await page.evaluate(`(() => {
+          const radios = document.querySelectorAll('input[type="radio"][name="${name}"]');
+          return Array.from(radios).map(r => {
+            const label = r.closest('label') || r.parentElement;
+            return (label?.textContent || '').trim();
+          }).filter(t => t.length > 0);
+        })()`).catch(() => []) as string[];
+
+        console.log(`    Radio "${groupLabel}": ${(optionTexts as string[]).join(' | ')}`);
+
+        // Pick best option
+        const gl = groupLabel.toLowerCase();
+        let answer = '';
+        if (gl.includes('work from') || gl.includes('location') || gl.includes('remote') || gl.includes('office')) {
+          const opts = optionTexts as string[];
+          answer = opts.find(o => o.toLowerCase().includes('remote')) ||
+                   opts.find(o => o.toLowerCase().includes('hybrid')) ||
+                   opts.find(o => o.toLowerCase().includes('relocat')) ||
+                   opts[0] || '';
+        }
+
+        if (answer) {
+          // Click the label/container of the matching option
+          const allRadios = await page.$$(`input[type="radio"][name="${name}"]`);
+          for (const radio of allRadios) {
+            const radioText = await radio.evaluate((el) => {
+              const label = el.closest('label') || el.parentElement;
+              return (label?.textContent || '').trim();
+            }).catch(() => '');
+            if (radioText.toLowerCase().includes(answer.toLowerCase()) || answer.toLowerCase().includes(radioText.toLowerCase())) {
+              await radio.click({ force: true });
+              console.log(`    ✓ Radio (Ashby): "${groupLabel}" → "${radioText}"`);
+              break;
+            }
+          }
+        }
+      }
+    }
+    await sleep(300);
+    // Skip all regular handlers for Ashby — already filled everything above
+    return;
+  }
+
   // ── Text inputs (skip file, hidden, and combobox inputs) ──
   try {
     const inputs = await page.$$(
@@ -1264,7 +2098,7 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
       // Try saved rules first (user corrections override hardcoded defaults)
       try {
         const ruleAnswer = await answerQuestion(label, 'text');
-        if (ruleAnswer && ruleAnswer.length > 0 && ruleAnswer.length < 200) {
+        if (ruleAnswer && ruleAnswer.length > 0 && ruleAnswer.length < 200 && !isRefusalText(ruleAnswer)) {
           await input.fill(ruleAnswer);
           await sleep(100);
           console.log(`    ✓ Filled (rule): "${label}" = "${ruleAnswer}"`);
@@ -1365,7 +2199,7 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
       let answer = '';
       try {
         const ruleAnswer = await answerQuestion(label, 'textarea');
-        if (ruleAnswer && ruleAnswer.length > 0) answer = ruleAnswer;
+        if (ruleAnswer && ruleAnswer.length > 0 && !isRefusalText(ruleAnswer)) answer = ruleAnswer;
       } catch {
         /* skip */
       }
@@ -1416,7 +2250,7 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
       if (!bestOption) {
         try {
           const ruleAnswer = await answerQuestion(label, 'select', options);
-          if (ruleAnswer) {
+          if (ruleAnswer && !isRefusalText(ruleAnswer)) {
             const matched = smartMatchOption(ruleAnswer, options, label);
             if (matched) bestOption = matched;
           }
@@ -1484,7 +2318,7 @@ async function fillFormFields(page: Page, job: ScoredJob): Promise<void> {
       if (!answer) {
         try {
           const ruleAnswer = await answerQuestion(legend, 'radio', radioLabels);
-          if (ruleAnswer) {
+          if (ruleAnswer && !isRefusalText(ruleAnswer)) {
             const matched = smartMatchOption(ruleAnswer, radioLabels, legend);
             if (matched) answer = matched;
           }
@@ -1719,18 +2553,26 @@ async function handleResumeUpload(page: Page): Promise<void> {
 
 export async function applyViaGreenhouse(page: Page, job: ScoredJob): Promise<ApplicationResult> {
   try {
-    // Build direct Greenhouse application URL if possible
-    const directUrl = getGreenhouseDirectUrl(job);
-    const targetUrl = directUrl || job.url;
+    let targetUrl: string;
 
-    console.log(`  Navigating to: ${targetUrl}`);
+    if (job.source === 'ashby' && job.url.includes('ashbyhq.com')) {
+      // Ashby: navigate directly to the application page
+      targetUrl = job.url.endsWith('/application') ? job.url : `${job.url}/application`;
+      console.log(`  Navigating to Ashby application: ${targetUrl}`);
+    } else {
+      // Greenhouse: build direct URL if possible
+      const directUrl = getGreenhouseDirectUrl(job);
+      targetUrl = directUrl || job.url;
+      console.log(`  Navigating to: ${targetUrl}`);
+    }
+
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await sleep(1000);
+    await sleep(1500);
 
-    // If we landed on a company page (not Greenhouse directly), click Apply
-    if (!page.url().includes('greenhouse.io')) {
+    // If we landed on a company page (not Greenhouse/Ashby form), click Apply
+    if (!page.url().includes('greenhouse.io') && !page.url().includes('/application')) {
       const applyBtn = await page.$(
-        'a[href*="apply"], a[href*="#app"], a:has-text("Apply for this job"), a:has-text("Apply Now"), a:has-text("Apply"), button:has-text("Apply")',
+        'a[href*="apply"], a[href*="#app"], a[href*="application"], a:has-text("Apply for this job"), a:has-text("Apply Now"), a:has-text("Apply"), button:has-text("Apply")',
       );
       if (applyBtn) {
         console.log('  Clicking Apply button...');
@@ -1742,28 +2584,27 @@ export async function applyViaGreenhouse(page: Page, job: ScoredJob): Promise<Ap
       const ghFrame = page.frames().find((f) => f.url().includes('greenhouse.io'));
       if (ghFrame) {
         console.log('  Found Greenhouse iframe — switching to it');
-        // Navigate directly to the iframe URL instead
         const iframeUrl = ghFrame.url();
         await page.goto(iframeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await sleep(1000);
       }
     }
 
-    // Wait for the first_name field
+    // Wait for form — Greenhouse uses first_name, Ashby uses _systemfield_name or generic input
     const nameField = await page
-      .waitForSelector('input[id="first_name"], input[id="firstname"], input[name*="first_name"]', {
+      .waitForSelector('input[id="first_name"], input[id="firstname"], input[name*="first_name"], input[name*="name"][type="text"], form input[type="text"]', {
         timeout: 15000,
       })
       .catch(() => null);
     if (!nameField) {
-      console.log('  No application form found (no first_name field)');
+      console.log('  No application form found');
       await page
-        .screenshot({ path: path.join(__dirname, '../../data/debug-greenhouse-apply.png') })
+        .screenshot({ path: path.join(__dirname, '../../data/debug-apply.png') })
         .catch(() => null);
       return { success: false, reason: 'No application form found on page' };
     }
 
-    console.log('  Application form found (first_name field detected)');
+    console.log('  Application form found');
 
     // ── Try "Autofill with MyGreenhouse" ──
     const autofillBtn = await page.$(
@@ -1851,14 +2692,128 @@ export async function applyViaGreenhouse(page: Page, job: ScoredJob): Promise<Ap
 
     // Click submit button
     // TEMP: Skip auto-submit for testing — set to true to disable submit
+    // TEMP: Set to false to enable auto-submit
     const skipSubmit = true;
+    if (skipSubmit) {
+      console.log('  ✓ Form filled (submit disabled). Review mode — will exit shortly.');
+      // Snapshot the final form state for diagnostics
+      try {
+        // Comprehensive snapshot: detects unfilled required fields (text, textarea, select, combobox, radio groups)
+        const snapshotScript = `
+          (() => {
+            const results = [];
+            const seen = new Set();
+            // Check each visible form field
+            document.querySelectorAll('input, textarea, select').forEach((el) => {
+              if (el.offsetParent === null) return;
+              if (el.type === 'file' || el.type === 'hidden' || el.type === 'submit') return;
+              if (el.type === 'radio' || el.type === 'checkbox') return;
+              // Skip phone country picker input (always empty, managed by widget)
+              if (el.id === 'country' && el.type === 'text') return;
+              const role = el.getAttribute('role');
+              // For React Select combobox inputs — check outer shell for value-container--has-value
+              if (role === 'combobox') {
+                const shell = el.closest('[class*="select-shell"], [class*="select__container"], [class*="select__control"]');
+                if (shell) {
+                  const filledContainer = shell.querySelector('[class*="value-container"][class*="has-value"], [class*="value-container--has-value"]');
+                  if (filledContainer && (filledContainer.textContent || '').trim()) return;
+                  const sv = shell.querySelector('[class*="single-value"], [class*="singleValue"], [class*="multi-value"], [class*="multiValue"]');
+                  if (sv && (sv.textContent || '').trim()) return;
+                  const hiddenInput = shell.querySelector('input[type="hidden"]');
+                  if (hiddenInput && hiddenInput.value) return;
+                }
+              }
+              const val = (el.value || '').trim();
+              if (val) return;
+              // For native <select>, check option:checked with non-empty value
+              if (el.tagName === 'SELECT') {
+                const checked = el.querySelector('option:checked');
+                if (checked && checked.value) return;
+              }
+              // Get label
+              const wrapper = el.closest('[class*="field"], [class*="Field"], .field, fieldset');
+              let label = '';
+              if (wrapper) {
+                const labelEl = wrapper.querySelector('label, legend');
+                label = labelEl ? (labelEl.textContent || '').trim() : '';
+              }
+              if (!label) label = el.getAttribute('aria-label') || '';
+              if (!label) label = el.placeholder || '';
+              const required = (label.includes('*') || el.required || el.getAttribute('aria-required') === 'true');
+              const key = (el.id || '') + ':' + label.slice(0, 40);
+              if (seen.has(key)) return;
+              seen.add(key);
+              results.push({
+                id: el.id || '',
+                tag: el.tagName + ':' + (el.type || role || ''),
+                label: label.slice(0, 80),
+                required,
+              });
+            });
+            // Check radio groups that aren't selected
+            const radioGroups = {};
+            document.querySelectorAll('input[type="radio"]').forEach((el) => {
+              const name = el.name || el.id;
+              if (!name) return;
+              if (!radioGroups[name]) radioGroups[name] = { any: el, checked: false };
+              if (el.checked) radioGroups[name].checked = true;
+            });
+            for (const name in radioGroups) {
+              if (radioGroups[name].checked) continue;
+              const el = radioGroups[name].any;
+              let node = el.parentElement;
+              let label = '';
+              for (let i = 0; i < 10 && node; i++) {
+                const legend = node.querySelector('legend');
+                if (legend) { label = (legend.textContent || '').trim(); break; }
+                const labels = node.querySelectorAll(':scope > label');
+                let found = false;
+                for (const l of Array.from(labels)) {
+                  if (!l.querySelector('input')) { label = (l.textContent || '').trim(); found = true; break; }
+                }
+                if (found) break;
+                node = node.parentElement;
+              }
+              // Skip garbage phone radio groups
+              if (label === 'Phone' || label === 'Country') continue;
+              const required = label.includes('*');
+              results.push({ id: name, tag: 'RADIO_GROUP', label: label.slice(0, 80), required });
+            }
+            // Check checkbox groups that aren't selected (multi-select questions)
+            const checkboxGroups = {};
+            document.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+              const name = el.name || el.id;
+              if (!name) return;
+              if (!checkboxGroups[name]) checkboxGroups[name] = { any: el, anyChecked: false };
+              if (el.checked) checkboxGroups[name].anyChecked = true;
+            });
+            for (const name in checkboxGroups) {
+              if (checkboxGroups[name].anyChecked) continue;
+              const el = checkboxGroups[name].any;
+              const wrapper = el.closest('fieldset, [class*="field"], [class*="Field"]');
+              const labelEl = wrapper ? wrapper.querySelector('label, legend') : null;
+              const label = labelEl ? (labelEl.textContent || '').trim() : '';
+              const required = label.includes('*') || (wrapper && (wrapper.querySelector('[class*="required"], [aria-required="true"]') !== null));
+              results.push({ id: name, tag: 'CHECKBOX_GROUP', label: label.slice(0, 80), required });
+            }
+            return results;
+          })()`;
+        const unfilled = await page.evaluate(snapshotScript).catch(() => []) as any[];
+        console.log(`  === UNFILLED FIELDS (${unfilled.length}) ===`);
+        for (const f of unfilled) {
+          console.log(`    ${f.required ? '[REQ]' : '[opt]'} ${f.tag} "${f.label}" id=${f.id}`);
+        }
+      } catch {}
+      await sleep(5000);
+      return { success: false, reason: 'Submit disabled — review mode' };
+    }
+
     const submitBtn = await page.$('form button[type="submit"], button:has-text("Submit Application"), button:has-text("Submit")');
-    if (submitBtn && !skipSubmit) {
+    if (submitBtn) {
       console.log('  Clicking Submit...');
       await submitBtn.click();
       await sleep(3000);
 
-      // Check if submission succeeded
       const success = await detectSubmissionSuccess(page);
       if (success) {
         console.log('  ✓ Application submitted successfully!');

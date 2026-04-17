@@ -13,7 +13,7 @@ import { PendingQuestion } from './pending-question';
 import { PrepareReview } from './prepare-review';
 
 type Tab = 'queue' | 'applied' | 'accepted' | 'declined' | 'rejected' | 'cover-letters' | 'prepare';
-type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed' | 'ashby';
+type PlatformFilter = 'all' | 'linkedin' | 'greenhouse' | 'lever' | 'indeed' | 'ashby' | 'manual';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('queue');
@@ -217,7 +217,7 @@ export function App() {
               )}
             </div>
             <div className="platform-filter">
-              {(['all', 'linkedin', 'greenhouse', 'lever', 'indeed', 'ashby'] as PlatformFilter[]).map((p) => (
+              {(['all', 'linkedin', 'greenhouse', 'ashby', 'lever', 'indeed'] as PlatformFilter[]).map((p) => (
                 <button
                   key={p}
                   className={`filter-btn ${platformFilter === p ? 'active' : ''}`}

@@ -255,6 +255,34 @@ export function matchOption(answer: string, options: string[]): string | null {
   return null;
 }
 
+// Heuristic: does this look like an LLM refusal / non-answer we shouldn't auto-submit?
+function isRefusal(text: string): boolean {
+  if (!text) return true;
+  const t = text.trim().toLowerCase();
+  if (t.length < 2) return true;
+  if (t.length > 400) return true; // LLM explanatory ramble — too long for a form answer
+  const refusalMarkers = [
+    "i can't answer",
+    "i cannot answer",
+    "i don't wish to",
+    "the candidate should",
+    "candidate needs to",
+    "candidate themselves",
+    "i decline to",
+    "i shouldn't guess",
+    "prefer not to say",
+    "i'm not able to",
+    "i am not able to",
+    "this is personal",
+    "sensitive personal",
+    "only the candidate",
+    'inferred from',
+    'not included in',
+    'not something that',
+  ];
+  return refusalMarkers.some((m) => t.includes(m));
+}
+
 export async function preAnswerFields(
   fields: ScrapedField[],
   job: ScoredJob,
@@ -304,7 +332,7 @@ export async function preAnswerFields(
     }
 
     // 3. Try LLM for non-dropdown fields
-    const candidateInfo = `Candidate: ${profile?.personal?.name || 'Parinita Kumari'}, Female, located in ${profile?.preferences?.location?.current_city || 'Fremont, CA'}, USA. Backend Engineer, ${profile?.experience?.total_years || 7} years, TypeScript/Node.js. Authorized to work in US, no sponsorship needed.`;
+    const candidateInfo = `Candidate: ${profile?.personal?.name || 'Parinita Kumari'}, Female, located in ${profile?.preferences?.location?.current_city || 'Fremont, CA'}, USA. Backend Engineer, ${profile?.experience?.total_years || 7} years, TypeScript/Node.js. Authorized to work in US, no sponsorship needed. AI/Side project: Built JobPilot (https://github.com/Parinita789/job-agent) — an AI-powered job hunting automation platform using TypeScript, Node.js, Playwright, MongoDB, NestJS, React. Scrapes jobs from LinkedIn/Greenhouse/Ashby, scores with Claude, pre-fills application forms, auto-applies.`;
     if (field.type === 'text' || field.type === 'textarea') {
       try {
         const prompt =
@@ -312,7 +340,7 @@ export async function preAnswerFields(
             ? `Answer this job application question in 2-3 sentences.\nQuestion: "${field.label}"\nJob: ${job.title} at ${job.company}\n${candidateInfo}\nAnswer directly.`
             : `Answer this field concisely (under 100 chars).\nField: "${field.label}"\nJob: ${job.title} at ${job.company}\n${candidateInfo}\nReply with ONLY the answer.`;
         const answer = await llmChat(prompt, { maxTokens: field.type === 'textarea' ? 200 : 50 });
-        if (answer && answer.length > 0) {
+        if (answer && answer.length > 0 && !isRefusal(answer)) {
           field.value = answer;
           field.source = 'llm';
           continue;
@@ -331,7 +359,7 @@ export async function preAnswerFields(
       try {
         const prompt = `Pick the best option for: "${field.label}"\nOptions: ${field.options.join(', ')}\n${candidateInfo}\nReply with ONLY the exact option text.`;
         const answer = await llmChat(prompt, { maxTokens: 50 });
-        if (answer) {
+        if (answer && !isRefusal(answer)) {
           const matched = matchOption(answer, field.options);
           if (matched) {
             field.value = matched;

@@ -23,7 +23,7 @@ function isRelevantRole(title: string, description: string, location: string): b
   // Must be a software/backend/platform role
   const roleTitles = [
     'software engineer', 'software developer', 'backend engineer', 'back-end engineer',
-    'platform engineer', 'fullstack', 'full stack', 'staff engineer', 'principal engineer',
+    'platform engineer', 'fullstack', 'full stack',
     'senior engineer', 'senior developer', 'engineer ii', 'engineer iii', 'engineer iv',
     'api engineer', 'infrastructure engineer', 'engineer,', 'engineer -',
   ];
